@@ -5,7 +5,9 @@ use reqwest::StatusCode;
 use reqwest::header::HeaderMap;
 use serde::Deserialize;
 
-use crate::check::{Check, CheckContext, CheckError, CheckReport, Finding};
+use crate::check::{
+    Check, CheckContext, CheckError, CheckReport, Finding, MAX_TEXT_BODY_BYTES, read_body_limited,
+};
 
 const DOCS_SECURITY_TXT: &str = "https://www.rfc-editor.org/rfc/rfc9116";
 
@@ -271,7 +273,14 @@ async fn check_security_txt(ctx: &CheckContext) -> Finding {
         .with_docs(DOCS_SECURITY_TXT);
     }
 
-    let body = resp.text().await.unwrap_or_default();
+    let body = match read_body_limited(resp, MAX_TEXT_BODY_BYTES).await {
+        Ok(body) => body,
+        Err(err) => {
+            return Finding::fail("security.txt", Some(format!("failed to read {url}: {err}")))
+                .with_rule("security/security-txt")
+                .with_docs(DOCS_SECURITY_TXT);
+        }
+    };
     let now_unix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));

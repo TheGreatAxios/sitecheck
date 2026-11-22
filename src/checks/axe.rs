@@ -1,4 +1,5 @@
 use std::io::ErrorKind;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -8,6 +9,7 @@ use tokio::process::Command;
 use crate::check::{Check, CheckContext, CheckError, CheckReport, Finding, validate_http_url};
 
 const MAX_VIOLATION_ITEMS: usize = 5;
+const SUBPROCESS_TIMEOUT: Duration = Duration::from_secs(120);
 
 fn default_tags() -> Vec<String> {
     vec![
@@ -212,37 +214,50 @@ async fn run_axe_command(
     axe_args.push("--exit".to_owned());
 
     if let Some(raw_bin) = bin.map(str::trim).filter(|s| !s.is_empty()) {
-        let mut parts = raw_bin.split_whitespace();
-        let program = parts
-            .next()
-            .ok_or_else(|| CheckError::Config("axe `bin` must not be empty".to_owned()))?;
-        let mut cmd = Command::new(program);
-        for prefix_arg in parts {
-            cmd.arg(prefix_arg);
-        }
+        let mut cmd = Command::new(raw_bin);
+        cmd.kill_on_drop(true);
         cmd.args(&axe_args);
-        let output = cmd
-            .output()
+        let output = tokio::time::timeout(SUBPROCESS_TIMEOUT, cmd.output())
             .await
+            .map_err(|_| {
+                CheckError::Other(format!(
+                    "`{raw_bin}` timed out after {}s for {target_url}",
+                    SUBPROCESS_TIMEOUT.as_secs()
+                ))
+            })?
             .map_err(|err| CheckError::Other(format!("failed to run `{raw_bin}` CLI: {err}")))?;
         return Ok((raw_bin.to_owned(), output));
     }
 
     let mut cmd = Command::new("axe");
+    cmd.kill_on_drop(true);
     cmd.args(&axe_args);
-    match cmd.output().await {
-        Ok(output) => Ok(("axe".to_owned(), output)),
-        Err(err) if err.kind() == ErrorKind::NotFound => {
+    match tokio::time::timeout(SUBPROCESS_TIMEOUT, cmd.output()).await {
+        Ok(Ok(output)) => Ok(("axe".to_owned(), output)),
+        Ok(Err(err)) if err.kind() == ErrorKind::NotFound => {
             let mut fallback = Command::new("npx");
+            fallback.kill_on_drop(true);
             fallback.arg("--yes").arg("@axe-core/cli").args(&axe_args);
-            let output = fallback.output().await.map_err(|fallback_err| {
-                CheckError::Other(format!(
-                    "failed to run `axe` ({err}) and fallback `npx --yes @axe-core/cli` ({fallback_err})"
-                ))
-            })?;
+            let output = tokio::time::timeout(SUBPROCESS_TIMEOUT, fallback.output())
+                .await
+                .map_err(|_| {
+                    CheckError::Other(format!(
+                        "`npx --yes @axe-core/cli` timed out after {}s for {target_url}",
+                        SUBPROCESS_TIMEOUT.as_secs()
+                    ))
+                })?
+                .map_err(|fallback_err| {
+                    CheckError::Other(format!(
+                        "failed to run `axe` ({err}) and fallback `npx --yes @axe-core/cli` ({fallback_err})"
+                    ))
+                })?;
             Ok(("npx --yes @axe-core/cli".to_owned(), output))
         }
-        Err(err) => Err(CheckError::Other(format!("failed to run `axe` CLI: {err}"))),
+        Ok(Err(err)) => Err(CheckError::Other(format!("failed to run `axe` CLI: {err}"))),
+        Err(_) => Err(CheckError::Other(format!(
+            "`axe` timed out after {}s for {target_url}",
+            SUBPROCESS_TIMEOUT.as_secs()
+        ))),
     }
 }
 
@@ -259,6 +274,7 @@ impl Check for AxeCheck {
         } else {
             self.config.paths.clone()
         };
+        let show_prefix = paths.len() > 1;
 
         for path in &paths {
             let target_url = ctx.base_url.join(path)?;
@@ -272,7 +288,14 @@ impl Check for AxeCheck {
 
             let stdout = String::from_utf8_lossy(&output.stdout);
             match parse_axe_report(&stdout) {
-                Ok(parsed) => findings.extend(parsed),
+                Ok(mut parsed) => {
+                    if show_prefix {
+                        for finding in &mut parsed {
+                            finding.title = format!("{path} {}", finding.title);
+                        }
+                    }
+                    findings.extend(parsed);
+                }
                 Err(parse_err) => {
                     if !output.status.success() {
                         let stderr = String::from_utf8_lossy(&output.stderr);

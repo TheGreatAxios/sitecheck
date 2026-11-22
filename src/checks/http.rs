@@ -4,7 +4,10 @@ use reqwest::header::LOCATION;
 use serde::Deserialize;
 use url::Url;
 
-use crate::check::{Check, CheckContext, CheckError, CheckReport, Finding};
+use crate::check::{
+    Check, CheckContext, CheckError, CheckReport, Finding, MAX_HTML_BODY_BYTES,
+    MAX_TEXT_BODY_BYTES, is_same_site_host, read_body_limited,
+};
 
 const HTML_SIZE_WARN_BYTES: usize = 1_572_864; // 1.5 MiB
 const HTML_SIZE_FAIL_BYTES: usize = 2_097_152; // 2 MiB (Googlebot cutoff)
@@ -337,6 +340,7 @@ pub fn validate_html_size(bytes: usize) -> Finding {
 pub struct RobotsRules {
     googlebot: Vec<(bool, String)>,
     wildcard: Vec<(bool, String)>,
+    has_googlebot_group: bool,
 }
 
 impl RobotsRules {
@@ -372,6 +376,9 @@ impl RobotsRules {
             } else if key.eq_ignore_ascii_case("allow") || key.eq_ignore_ascii_case("disallow") {
                 saw_rule = true;
                 let is_allow = key.eq_ignore_ascii_case("allow");
+                if in_googlebot {
+                    rules.has_googlebot_group = true;
+                }
                 if val.is_empty() {
                     continue;
                 }
@@ -389,10 +396,10 @@ impl RobotsRules {
 
     #[must_use]
     pub fn is_disallowed(&self, path: &str) -> bool {
-        let group = if self.googlebot.is_empty() {
-            &self.wildcard
-        } else {
+        let group = if self.has_googlebot_group {
             &self.googlebot
+        } else {
+            &self.wildcard
         };
 
         let mut best: Option<(usize, bool)> = None;
@@ -469,7 +476,9 @@ pub fn has_content_signal(robots_body: &str) -> bool {
             .split_once('#')
             .map_or(raw_line, |(before, _)| before)
             .trim_start();
-        line.len() >= 15 && line[..15].eq_ignore_ascii_case("content-signal:")
+        line.as_bytes()
+            .get(..15)
+            .is_some_and(|p| p.eq_ignore_ascii_case(b"content-signal:"))
     })
 }
 
@@ -640,7 +649,13 @@ async fn check_www_redirect(ctx: &CheckContext) -> Finding {
         )
         .with_rule("http/www-redirect");
     };
-    if host.starts_with("www.") || host == "localhost" || host.parse::<std::net::IpAddr>().is_ok() {
+    if host.starts_with("www.")
+        || host == "localhost"
+        || matches!(
+            ctx.base_url.host(),
+            Some(url::Host::Ipv4(_) | url::Host::Ipv6(_))
+        )
+    {
         return Finding::pass(
             "www -> apex redirect",
             Some(format!("skipped for host `{host}`")),
@@ -709,6 +724,12 @@ async fn check_www_redirect(ctx: &CheckContext) -> Finding {
     .with_rule("http/www-redirect")
 }
 
+fn https_redirect_fail(detail: String) -> Finding {
+    Finding::fail("HTTP -> HTTPS redirect", Some(detail))
+        .with_rule("http/https-redirect")
+        .with_docs(DOCS_REDIRECTS)
+}
+
 async fn check_https_redirect(ctx: &CheckContext) -> Finding {
     let title = "HTTP -> HTTPS redirect";
     let rule = "http/https-redirect";
@@ -719,7 +740,12 @@ async fn check_https_redirect(ctx: &CheckContext) -> Finding {
     let Some(host) = ctx.base_url.host_str() else {
         return Finding::warn(title, Some("base URL has no host".to_owned())).with_rule(rule);
     };
-    if host == "localhost" || host.parse::<std::net::IpAddr>().is_ok() {
+    if host == "localhost"
+        || matches!(
+            ctx.base_url.host(),
+            Some(url::Host::Ipv4(_) | url::Host::Ipv6(_))
+        )
+    {
         return Finding::pass(title, Some(format!("skipped for host `{host}`"))).with_rule(rule);
     }
 
@@ -733,11 +759,7 @@ async fn check_https_redirect(ctx: &CheckContext) -> Finding {
     for hop in 1..=2 {
         let resp = match ctx.no_redirect_client.get(current.clone()).send().await {
             Ok(resp) => resp,
-            Err(err) => {
-                return Finding::fail(title, Some(format!("request to {current} failed: {err}")))
-                    .with_rule(rule)
-                    .with_docs(DOCS_REDIRECTS);
-            }
+            Err(err) => return https_redirect_fail(format!("request to {current} failed: {err}")),
         };
 
         let status = resp.status();
@@ -760,24 +782,20 @@ async fn check_https_redirect(ctx: &CheckContext) -> Finding {
                     .with_rule(rule);
                 }
                 if hop == 2 {
-                    return Finding::fail(
-                        title,
-                        Some(format!(
-                            "exceeded 2 hops: {current} -> {status} {resolved}, expected {}",
-                            ctx.base_url
-                        )),
-                    )
-                    .with_rule(rule)
-                    .with_docs(DOCS_REDIRECTS);
+                    return https_redirect_fail(format!(
+                        "exceeded 2 hops: {current} -> {status} {resolved}, expected {}",
+                        ctx.base_url
+                    ));
                 }
                 let Ok(next_url) = Url::parse(&resolved) else {
-                    return Finding::fail(
-                        title,
-                        Some(format!("invalid redirect target `{resolved}`")),
-                    )
-                    .with_rule(rule)
-                    .with_docs(DOCS_REDIRECTS);
+                    return https_redirect_fail(format!("invalid redirect target `{resolved}`"));
                 };
+                if !is_same_site_host(&ctx.base_url, &next_url) {
+                    return https_redirect_fail(format!(
+                        "{current} redirected ({status}) to unrelated host `{next_url}`, expected {}",
+                        ctx.base_url
+                    ));
+                }
                 current = next_url;
             }
             (302 | 307, Some(loc)) => {
@@ -791,22 +809,15 @@ async fn check_https_redirect(ctx: &CheckContext) -> Finding {
                 .with_docs(DOCS_REDIRECTS);
             }
             _ => {
-                return Finding::fail(
-                    title,
-                    Some(format!(
-                        "{current} returned HTTP {status} (expected 301/308 to {})",
-                        ctx.base_url
-                    )),
-                )
-                .with_rule(rule)
-                .with_docs(DOCS_REDIRECTS);
+                return https_redirect_fail(format!(
+                    "{current} returned HTTP {status} (expected 301/308 to {})",
+                    ctx.base_url
+                ));
             }
         }
     }
 
-    Finding::fail(title, Some("redirect loop exceeded 2 hops".to_owned()))
-        .with_rule(rule)
-        .with_docs(DOCS_REDIRECTS)
+    https_redirect_fail("redirect loop exceeded 2 hops".to_owned())
 }
 
 async fn check_soft_404(ctx: &CheckContext) -> Finding {
@@ -1065,7 +1076,18 @@ async fn check_robots(
         );
     }
 
-    let body = resp.text().await.unwrap_or_default();
+    let body = match read_body_limited(resp, MAX_TEXT_BODY_BYTES).await {
+        Ok(body) => body,
+        Err(err) => {
+            return (
+                vec![
+                    Finding::fail("robots.txt", Some(format!("failed to read body: {err}")))
+                        .with_rule("http/robots-txt"),
+                ],
+                RobotsRules::default(),
+            );
+        }
+    };
     if body.trim().is_empty() {
         return (
             vec![
@@ -1131,7 +1153,13 @@ async fn check_sitemap_urls(
             .filter_map(|v| v.to_str().ok().map(str::to_owned))
             .collect();
         let x_robots_refs: Vec<&str> = x_robots.iter().map(String::as_str).collect();
-        let html = resp.text().await.unwrap_or_default();
+        let html = match read_body_limited(resp, MAX_HTML_BODY_BYTES).await {
+            Ok(body) => body,
+            Err(err) => {
+                issues.push(format!("{loc}: failed to read body ({err})"));
+                continue;
+            }
+        };
 
         if !is_path_allowed_noindex(loc, allow_noindex) && has_noindex(&html, &x_robots_refs) {
             issues.push(format!("{loc}: emits `noindex`"));
@@ -1202,7 +1230,13 @@ async fn check_llms_txt(ctx: &CheckContext) -> Finding {
             .with_rule("http/llms-txt");
     }
 
-    let body = resp.text().await.unwrap_or_default();
+    let body = match read_body_limited(resp, MAX_TEXT_BODY_BYTES).await {
+        Ok(body) => body,
+        Err(err) => {
+            return Finding::fail("llms.txt", Some(format!("failed to read body: {err}")))
+                .with_rule("http/llms-txt");
+        }
+    };
     let validation = validate_llms_txt(&body);
     if validation.is_valid() {
         Finding::pass(
@@ -1250,7 +1284,7 @@ async fn check_sitemap(
         return Ok((findings, Vec::new()));
     }
 
-    let xml = resp.text().await.unwrap_or_default();
+    let xml = read_body_limited(resp, MAX_HTML_BODY_BYTES).await?;
     let sitemap_locs = extract_sitemap_locs(&xml);
     if sitemap_locs.is_empty() {
         findings.push(
@@ -1319,7 +1353,7 @@ impl Check for HttpCheck {
 
         let home_resp = ctx.client.get(ctx.base_url.clone()).send().await?;
         let home_status = home_resp.status();
-        let home_html = home_resp.text().await.unwrap_or_default();
+        let home_html = read_body_limited(home_resp, MAX_HTML_BODY_BYTES).await?;
         if home_status.is_success() {
             findings.push(
                 Finding::pass(
@@ -1528,6 +1562,22 @@ mod tests {
         let googlebot_override = "User-agent: *\nDisallow: /\n\nUser-agent: Googlebot\nAllow: /\n";
         let override_rules = RobotsRules::parse(googlebot_override);
         assert!(!override_rules.disallows_root());
+
+        // RFC 9309: empty Disallow in a Googlebot group overrides wildcard Disallow: /
+        let empty_disallow_override =
+            "User-agent: *\nDisallow: /\n\nUser-agent: Googlebot\nDisallow:\n";
+        let empty_override_rules = RobotsRules::parse(empty_disallow_override);
+        assert!(!empty_override_rules.disallows_root());
+        assert!(!empty_override_rules.is_disallowed("/about"));
+    }
+
+    #[test]
+    fn has_content_signal_handles_multibyte_utf8_at_byte_15() {
+        // "Disallow: /café" has multi-byte 'é' (0xC3 0xA9) crossing byte index 15.
+        assert!(!has_content_signal("Disallow: /café\n"));
+        assert!(has_content_signal(
+            "Disallow: /café\nContent-Signal: ai-train=no\n"
+        ));
     }
 
     #[test]

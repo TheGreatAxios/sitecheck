@@ -2,7 +2,9 @@ use async_trait::async_trait;
 use reqwest::StatusCode;
 use serde::Deserialize;
 
-use crate::check::{Check, CheckContext, CheckError, CheckReport, Finding};
+use crate::check::{
+    Check, CheckContext, CheckError, CheckReport, Finding, MAX_TEXT_BODY_BYTES, read_body_limited,
+};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -79,7 +81,21 @@ impl Check for IndexNowCheck {
             ));
         }
 
-        let body = resp.text().await.unwrap_or_default();
+        let body = match read_body_limited(resp, MAX_TEXT_BODY_BYTES).await {
+            Ok(body) => body,
+            Err(err) => {
+                return Ok(CheckReport::new(
+                    self.name(),
+                    vec![
+                        Finding::fail(
+                            "IndexNow key file",
+                            Some(format!("failed to read {target_url}: {err}")),
+                        )
+                        .with_rule("indexnow/key-file"),
+                    ],
+                ));
+            }
+        };
         let finding = if body.trim() == key {
             Finding::pass(
                 "IndexNow key file",

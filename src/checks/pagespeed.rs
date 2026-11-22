@@ -27,6 +27,29 @@ fn default_strategies() -> Vec<String> {
     vec!["mobile".to_owned(), "desktop".to_owned()]
 }
 
+fn validate_strategies(strategies: &[String]) -> Result<Vec<&'static str>, CheckError> {
+    if strategies.is_empty() {
+        return Err(CheckError::Config(
+            "pagespeed `strategies` must not be empty (expected `mobile` and/or `desktop`)"
+                .to_owned(),
+        ));
+    }
+    let mut normalized = Vec::with_capacity(strategies.len());
+    for raw in strategies {
+        let trimmed = raw.trim();
+        if trimmed.eq_ignore_ascii_case("mobile") {
+            normalized.push("mobile");
+        } else if trimmed.eq_ignore_ascii_case("desktop") {
+            normalized.push("desktop");
+        } else {
+            return Err(CheckError::Config(format!(
+                "unsupported pagespeed strategy `{raw}` (expected `mobile` or `desktop`)"
+            )));
+        }
+    }
+    Ok(normalized)
+}
+
 fn default_api_key_env() -> String {
     "PSI_API_KEY".to_owned()
 }
@@ -60,15 +83,17 @@ impl Check for PageSpeedCheck {
     }
 
     async fn run(&self, ctx: &CheckContext) -> Result<CheckReport, CheckError> {
+        let strategies = validate_strategies(&self.config.strategies)?;
         let api_key = env::var(&self.config.api_key_env)
             .ok()
-            .filter(|v| !v.trim().is_empty());
+            .map(|v| v.trim().to_owned())
+            .filter(|v| !v.is_empty());
 
         let mut findings = Vec::new();
-        for strategy in &self.config.strategies {
+        for strategy in strategies {
             let mut query: Vec<(&str, &str)> = vec![
                 ("url", ctx.base_url.as_str()),
-                ("strategy", strategy.as_str()),
+                ("strategy", strategy),
                 ("category", "performance"),
                 ("category", "accessibility"),
                 ("category", "best-practices"),
@@ -130,7 +155,18 @@ impl Check for PageSpeedCheck {
 
 #[cfg(test)]
 mod tests {
-    use super::redact_api_key;
+    use super::{redact_api_key, validate_strategies};
+
+    #[test]
+    fn validates_pagespeed_strategies() {
+        assert_eq!(
+            validate_strategies(&["mobile".to_owned(), "Desktop".to_owned()])
+                .expect("valid strategies"),
+            vec!["mobile", "desktop"]
+        );
+        assert!(validate_strategies(&[]).is_err());
+        assert!(validate_strategies(&["tablet".to_owned()]).is_err());
+    }
 
     #[test]
     fn redacts_raw_and_url_encoded_api_key_in_error_messages() {

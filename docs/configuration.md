@@ -59,7 +59,7 @@ Checks `<head>` canonical placement, unique titles and meta descriptions across 
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `check_favicon` | `bool` | `true` | Verify raster favicon, Apple touch icon, and web manifest icons |
+| `check_favicon` | `bool` | `true` | Probe `<link rel="icon">` (or `/favicon.ico`) and warn if only SVG is declared; Apple touch icon and web manifest checks (`name`/`short_name` JSON validation) run whenever `[seo]` is enabled |
 | `max_sitemap_urls` | `usize` | `15` | Maximum sitemap URLs sampled for uniqueness and metadata checks |
 
 ## `[security_headers]`
@@ -80,7 +80,7 @@ Parses `<script type="application/ld+json">` blocks and social metadata tags.
 | `check_site_name` | `bool` | `true` | Check for `WebSite` JSON-LD with a valid `name` |
 | `check_open_graph` | `bool` | `true` | Verify Open Graph (`og:*`) meta tags |
 | `check_twitter` | `bool` | `true` | Verify Twitter Card (`twitter:*`) meta tags |
-| `paths` | `string[]` | `[]` | Extra paths to inspect in addition to the homepage |
+| `paths` | `string[]` | `[]` | Paths to inspect; when non-empty, overrides the default `["/"]` list (include `"/"` to also check the homepage) |
 
 ## `[ai]`
 

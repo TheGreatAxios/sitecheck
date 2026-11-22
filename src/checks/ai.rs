@@ -3,7 +3,9 @@ use std::collections::BTreeMap;
 use async_trait::async_trait;
 use serde::Deserialize;
 
-use crate::check::{Check, CheckContext, CheckError, CheckReport, Finding};
+use crate::check::{
+    Check, CheckContext, CheckError, CheckReport, Finding, MAX_TEXT_BODY_BYTES, read_body_limited,
+};
 use crate::checks::http::{has_content_signal, robots_pattern_matches};
 
 const SEARCH_BOTS: &[&str] = &[
@@ -231,7 +233,21 @@ impl Check for AiCheck {
             ));
         }
 
-        let body = resp.text().await.unwrap_or_default();
+        let body = match read_body_limited(resp, MAX_TEXT_BODY_BYTES).await {
+            Ok(body) => body,
+            Err(err) => {
+                return Ok(CheckReport::new(
+                    self.name(),
+                    vec![
+                        Finding::fail(
+                            "AI & search bots crawlable",
+                            Some(format!("failed to read {url}: {err}")),
+                        )
+                        .with_rule("ai/search-bots-allowed"),
+                    ],
+                ));
+            }
+        };
         let findings = evaluate_ai_robots(&body, &self.config.allow_blocked);
         Ok(CheckReport::new(self.name(), findings))
     }

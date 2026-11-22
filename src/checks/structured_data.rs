@@ -5,7 +5,9 @@ use serde::Deserialize;
 use serde_json::Value;
 use url::Url;
 
-use crate::check::{Check, CheckContext, CheckError, CheckReport, Finding};
+use crate::check::{
+    Check, CheckContext, CheckError, CheckReport, Finding, MAX_HTML_BODY_BYTES, read_body_limited,
+};
 use crate::checks::http::parse_html_attr;
 
 const DOCS_SITE_NAMES: &str = "https://developers.google.com/search/docs/appearance/site-names";
@@ -579,7 +581,7 @@ impl Check for StructuredDataCheck {
                 );
                 continue;
             }
-            let html = resp.text().await.unwrap_or_default();
+            let html = read_body_limited(resp, MAX_HTML_BODY_BYTES).await?;
 
             let blocks = extract_json_ld_blocks(&html);
             evaluate_json_ld(&prefix, path, &blocks, &self.config, &mut findings);

@@ -7,7 +7,9 @@ use serde::Deserialize;
 use serde_json::Value;
 use url::Url;
 
-use crate::check::{Check, CheckContext, CheckError, CheckReport, Finding};
+use crate::check::{
+    Check, CheckContext, CheckError, CheckReport, Finding, MAX_HTML_BODY_BYTES, read_body_limited,
+};
 use crate::checks::http::{
     extract_all_canonicals, extract_head, extract_robots_directives, extract_sitemap_locs,
     is_same_origin, parse_html_attr, urls_match,
@@ -550,36 +552,49 @@ async fn check_favicon(ctx: &CheckContext, html: &str) -> Vec<Finding> {
         }
     };
 
-    match ctx.client.get(target_url.clone()).send().await {
-        Ok(resp) if resp.status().is_success() => {
-            findings.push(
-                Finding::pass(
-                    "favicon",
-                    Some(format!("HTTP {} at {target_url}", resp.status())),
-                )
-                .with_rule("seo/favicon"),
-            );
+    if is_same_origin(&ctx.base_url, &target_url) {
+        match ctx.same_origin_client.get(target_url.clone()).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                findings.push(
+                    Finding::pass(
+                        "favicon",
+                        Some(format!("HTTP {} at {target_url}", resp.status())),
+                    )
+                    .with_rule("seo/favicon"),
+                );
+            }
+            Ok(resp) => {
+                findings.push(
+                    Finding::fail(
+                        "favicon",
+                        Some(format!("HTTP {} at {target_url}", resp.status())),
+                    )
+                    .with_rule("seo/favicon")
+                    .with_docs(DOCS_FAVICON),
+                );
+            }
+            Err(err) => {
+                findings.push(
+                    Finding::fail(
+                        "favicon",
+                        Some(format!("request to {target_url} failed: {err}")),
+                    )
+                    .with_rule("seo/favicon")
+                    .with_docs(DOCS_FAVICON),
+                );
+            }
         }
-        Ok(resp) => {
-            findings.push(
-                Finding::fail(
-                    "favicon",
-                    Some(format!("HTTP {} at {target_url}", resp.status())),
-                )
-                .with_rule("seo/favicon")
-                .with_docs(DOCS_FAVICON),
-            );
-        }
-        Err(err) => {
-            findings.push(
-                Finding::fail(
-                    "favicon",
-                    Some(format!("request to {target_url} failed: {err}")),
-                )
-                .with_rule("seo/favicon")
-                .with_docs(DOCS_FAVICON),
-            );
-        }
+    } else {
+        findings.push(
+            Finding::warn(
+                "favicon",
+                Some(format!(
+                    "skipped off-origin favicon URL {target_url} (expected same origin as {})",
+                    ctx.base_url
+                )),
+            )
+            .with_rule("seo/favicon"),
+        );
     }
 
     if has_only_svg_favicon(&links) {
@@ -616,7 +631,18 @@ async fn check_apple_touch_icon(ctx: &CheckContext, html: &str) -> Finding {
         .with_rule("seo/apple-touch-icon");
     };
 
-    match ctx.client.get(url.clone()).send().await {
+    if !is_same_origin(&ctx.base_url, &url) {
+        return Finding::warn(
+            "apple-touch-icon",
+            Some(format!(
+                "skipped off-origin URL {url} (expected same origin as {})",
+                ctx.base_url
+            )),
+        )
+        .with_rule("seo/apple-touch-icon");
+    }
+
+    match ctx.same_origin_client.get(url.clone()).send().await {
         Ok(resp) if resp.status() == StatusCode::OK => {
             let content_type = resp
                 .headers()
@@ -671,7 +697,20 @@ async fn check_web_manifest(ctx: &CheckContext, html: &str) -> Option<Finding> {
         );
     };
 
-    let resp = match ctx.client.get(url.clone()).send().await {
+    if !is_same_origin(&ctx.base_url, &url) {
+        return Some(
+            Finding::warn(
+                "web manifest",
+                Some(format!(
+                    "skipped off-origin URL {url} (expected same origin as {})",
+                    ctx.base_url
+                )),
+            )
+            .with_rule("seo/web-manifest"),
+        );
+    }
+
+    let resp = match ctx.same_origin_client.get(url.clone()).send().await {
         Ok(resp) => resp,
         Err(err) => {
             return Some(
@@ -694,7 +733,15 @@ async fn check_web_manifest(ctx: &CheckContext, html: &str) -> Option<Finding> {
         );
     }
 
-    let body = resp.text().await.unwrap_or_default();
+    let body = match read_body_limited(resp, MAX_HTML_BODY_BYTES).await {
+        Ok(body) => body,
+        Err(err) => {
+            return Some(
+                Finding::fail("web manifest", Some(format!("failed to read {url}: {err}")))
+                    .with_rule("seo/web-manifest"),
+            );
+        }
+    };
     Some(match validate_web_manifest_json(&body) {
         Ok(name) => Finding::pass("web manifest", Some(format!("{name} ({url})")))
             .with_rule("seo/web-manifest"),
@@ -720,7 +767,9 @@ async fn check_sitemap_duplicates(
     if !resp.status().is_success() {
         return Vec::new();
     }
-    let xml = resp.text().await.unwrap_or_default();
+    let Ok(xml) = read_body_limited(resp, MAX_HTML_BODY_BYTES).await else {
+        return Vec::new();
+    };
     let locs = extract_sitemap_locs(&xml);
     if locs.len() <= 1 {
         return Vec::new();
@@ -748,7 +797,10 @@ async fn check_sitemap_duplicates(
             if !page_resp.status().is_success() {
                 continue;
             }
-            page_resp.text().await.unwrap_or_default()
+            let Ok(body) = read_body_limited(page_resp, MAX_HTML_BODY_BYTES).await else {
+                continue;
+            };
+            body
         };
 
         let title = extract_title(&html);
@@ -766,7 +818,7 @@ async fn check_sitemap_duplicates(
                     off_origin.len()
                 )),
             )
-            .with_rule("seo/sitemap-duplicates")
+            .with_rule("seo/duplicate-title")
             .with_items(off_origin),
         );
     }
@@ -806,7 +858,7 @@ impl Check for SeoCheck {
             .filter_map(|v| v.to_str().ok().map(str::to_owned))
             .collect();
         let x_robots_refs: Vec<&str> = x_robots.iter().map(String::as_str).collect();
-        let home_html = resp.text().await.unwrap_or_default();
+        let home_html = read_body_limited(resp, MAX_HTML_BODY_BYTES).await?;
 
         let mut findings = validate_seo_metadata(&home_html);
         findings.push(validate_snippet_directives(&home_html, &x_robots_refs));

@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use url::form_urlencoded;
+use url::{Url, form_urlencoded};
 
 use crate::check::{Check, CheckContext, CheckError, CheckReport, Finding};
 
@@ -74,7 +74,7 @@ fn load_service_account(env_name: &str) -> Result<ServiceAccountKey, CheckError>
     } else {
         fs::read_to_string(trimmed).map_err(|err| {
             CheckError::Config(format!(
-                "failed to read service account file `{trimmed}` from `{env_name}`: {err}"
+                "failed to read service account file from `{env_name}`: {err}"
             ))
         })?
     };
@@ -86,11 +86,22 @@ fn load_service_account(env_name: &str) -> Result<ServiceAccountKey, CheckError>
     })
 }
 
+fn validate_token_uri(uri: &str) -> Result<(), CheckError> {
+    let trimmed = uri.trim();
+    match Url::parse(trimmed) {
+        Ok(parsed) if parsed.scheme() == "https" && parsed.host_str().is_some() => Ok(()),
+        _ => Err(CheckError::Config(format!(
+            "service account `token_uri` must be a valid `https://` URL (got `{trimmed}`)"
+        ))),
+    }
+}
+
 async fn exchange_jwt_for_token(
     client: &reqwest::Client,
     sa: &ServiceAccountKey,
 ) -> Result<String, CheckError> {
-    let token_uri = sa.token_uri.as_deref().unwrap_or(DEFAULT_TOKEN_URI);
+    let token_uri = sa.token_uri.as_deref().map_or(DEFAULT_TOKEN_URI, str::trim);
+    validate_token_uri(token_uri)?;
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|err| CheckError::Other(format!("system clock error: {err}")))?
@@ -341,5 +352,18 @@ impl Check for SearchConsoleCheck {
         }
 
         Ok(CheckReport::new(self.name(), findings))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_token_uri;
+
+    #[test]
+    fn requires_https_token_uri() {
+        assert!(validate_token_uri("https://oauth2.googleapis.com/token").is_ok());
+        assert!(validate_token_uri("http://oauth2.googleapis.com/token").is_err());
+        assert!(validate_token_uri("http://169.254.169.254/token").is_err());
+        assert!(validate_token_uri("not-a-url").is_err());
     }
 }
