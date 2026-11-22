@@ -31,6 +31,7 @@ const fn default_max_sitemap_urls() -> usize {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SeoConfig {
     #[serde(default = "default_true")]
     pub check_favicon: bool,

@@ -28,6 +28,7 @@ const TRAINING_BOTS: &[&str] = &[
 ];
 
 #[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AiConfig {
     #[serde(default)]
     pub allow_blocked: Vec<String>,

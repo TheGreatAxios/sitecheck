@@ -35,6 +35,7 @@ pub enum RuleLevel {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     pub url: Url,
     #[serde(default)]
@@ -274,5 +275,34 @@ url = "https://example.com/"
         assert_eq!(checks.len(), 1);
         assert_eq!(checks[0].name(), "http");
         assert!(config.rules.is_empty());
+    }
+
+    #[test]
+    fn parses_example_sitecheck_toml() {
+        let example = include_str!("../examples/sitecheck.toml");
+        let config = Config::parse(example).expect("examples/sitecheck.toml should parse");
+        assert_eq!(config.url.as_str(), "https://example.com/");
+        assert!(config.http.is_some());
+        assert!(config.seo.is_some());
+        assert!(config.security_headers.is_some());
+        assert!(config.structured_data.is_some());
+        assert!(config.ai.is_some());
+    }
+
+    #[test]
+    fn rejects_unknown_config_fields() {
+        let bad_top_level = r#"
+url = "https://example.com/"
+unknown_flag = true
+"#;
+        assert!(Config::parse(bad_top_level).is_err());
+
+        let bad_section_field = r#"
+url = "https://example.com/"
+
+[http]
+check_canonicals = true
+"#;
+        assert!(Config::parse(bad_section_field).is_err());
     }
 }

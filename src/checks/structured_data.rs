@@ -28,6 +28,7 @@ const fn default_true() -> bool {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StructuredDataConfig {
     #[serde(default)]
     pub required_types: Vec<String>,

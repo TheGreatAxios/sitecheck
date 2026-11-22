@@ -38,6 +38,7 @@ const fn default_max_sitemap_urls() -> usize {
 
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct HttpConfig {
     #[serde(default = "default_true")]
     pub check_www_redirect: bool,

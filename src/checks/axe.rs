@@ -5,7 +5,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use tokio::process::Command;
 
-use crate::check::{Check, CheckContext, CheckError, CheckReport, Finding};
+use crate::check::{Check, CheckContext, CheckError, CheckReport, Finding, validate_http_url};
 
 const MAX_VIOLATION_ITEMS: usize = 5;
 
@@ -23,6 +23,7 @@ fn default_paths() -> Vec<String> {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AxeConfig {
     pub bin: Option<String>,
     #[serde(default = "default_tags")]
@@ -261,6 +262,7 @@ impl Check for AxeCheck {
 
         for path in &paths {
             let target_url = ctx.base_url.join(path)?;
+            validate_http_url(&target_url)?;
             let (bin_label, output) = run_axe_command(
                 self.config.bin.as_deref(),
                 target_url.as_str(),

@@ -7,7 +7,19 @@ use thiserror::Error;
 use url::Url;
 
 const USER_AGENT: &str = concat!("sitecheck/", env!("CARGO_PKG_VERSION"));
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
+
+pub(crate) fn validate_http_url(url: &Url) -> Result<(), CheckError> {
+    if matches!(url.scheme(), "http" | "https") {
+        Ok(())
+    } else {
+        Err(CheckError::Config(format!(
+            "unsupported URL scheme `{}` in `{url}` (expected `http` or `https`)",
+            url.scheme()
+        )))
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -159,13 +171,17 @@ pub struct CheckContext {
 
 impl CheckContext {
     pub fn new(base_url: Url) -> Result<Self, CheckError> {
+        validate_http_url(&base_url)?;
+
         let client = reqwest::Client::builder()
             .user_agent(USER_AGENT)
+            .connect_timeout(CONNECT_TIMEOUT)
             .timeout(REQUEST_TIMEOUT)
             .build()?;
 
         let no_redirect_client = reqwest::Client::builder()
             .user_agent(USER_AGENT)
+            .connect_timeout(CONNECT_TIMEOUT)
             .timeout(REQUEST_TIMEOUT)
             .redirect(Policy::none())
             .build()?;
@@ -182,4 +198,22 @@ impl CheckContext {
 pub trait Check: Send + Sync {
     fn name(&self) -> &'static str;
     async fn run(&self, ctx: &CheckContext) -> Result<CheckReport, CheckError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use url::Url;
+
+    use super::validate_http_url;
+
+    #[test]
+    fn validates_http_and_https_urls_only() {
+        let https = Url::parse("https://example.com/").expect("valid https url");
+        let http = Url::parse("http://localhost:8080/").expect("valid http url");
+        let file = Url::parse("file:///etc/passwd").expect("valid file url");
+
+        assert!(validate_http_url(&https).is_ok());
+        assert!(validate_http_url(&http).is_ok());
+        assert!(validate_http_url(&file).is_err());
+    }
 }

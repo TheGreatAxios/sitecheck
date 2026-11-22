@@ -21,6 +21,7 @@ fn default_service_account_env() -> String {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SearchConsoleConfig {
     pub site_url: Option<String>,
     #[serde(default = "default_service_account_env")]
@@ -40,7 +41,7 @@ impl SearchConsoleCheck {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct ServiceAccountKey {
     client_email: String,
     private_key: String,
@@ -56,7 +57,7 @@ struct JwtClaims<'a> {
     exp: u64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct TokenResponse {
     access_token: String,
 }

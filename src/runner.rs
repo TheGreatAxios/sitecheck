@@ -23,7 +23,13 @@ pub fn apply_rule_overrides(report: &mut CheckReport, rules: &BTreeMap<String, R
         let Some(rule_id) = finding.rule.as_deref() else {
             return true;
         };
-        let Some(&level) = rules.get(rule_id) else {
+        let level = rules.get(rule_id).copied().or_else(|| {
+            rule_id
+                .starts_with("axe/")
+                .then(|| rules.get("axe/wcag").copied())
+                .flatten()
+        });
+        let Some(level) = level else {
             return true;
         };
 
@@ -218,5 +224,40 @@ mod tests {
 
         let rendered = format_text(&summary);
         assert!(rendered.contains("[WARN] seo/apple-touch-icon — apple-touch-icon: missing"));
+    }
+
+    #[test]
+    fn applies_axe_wcag_fallback_override_with_exact_precedence() {
+        let mut report = CheckReport::new(
+            "axe",
+            vec![
+                Finding::fail("Images must have alt text", None).with_rule("axe/image-alt"),
+                Finding::fail("Color contrast", None).with_rule("axe/color-contrast"),
+                Finding::fail("Homepage status", None).with_rule("http/homepage-status"),
+            ],
+        );
+
+        let warn_rules = BTreeMap::from([
+            ("axe/wcag".to_owned(), RuleLevel::Warn),
+            ("axe/color-contrast".to_owned(), RuleLevel::Off),
+        ]);
+        apply_rule_overrides(&mut report, &warn_rules);
+
+        assert_eq!(report.findings.len(), 2);
+        assert_eq!(report.findings[0].rule.as_deref(), Some("axe/image-alt"));
+        assert_eq!(report.findings[0].severity, Severity::Warn);
+        assert_eq!(
+            report.findings[1].rule.as_deref(),
+            Some("http/homepage-status")
+        );
+        assert_eq!(report.findings[1].severity, Severity::Fail);
+
+        let off_rules = BTreeMap::from([("axe/wcag".to_owned(), RuleLevel::Off)]);
+        apply_rule_overrides(&mut report, &off_rules);
+        assert_eq!(report.findings.len(), 1);
+        assert_eq!(
+            report.findings[0].rule.as_deref(),
+            Some("http/homepage-status")
+        );
     }
 }

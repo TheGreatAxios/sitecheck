@@ -5,6 +5,7 @@ use serde::Deserialize;
 use crate::check::{Check, CheckContext, CheckError, CheckReport, Finding};
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct IndexNowConfig {
     pub key: String,
     #[serde(default)]

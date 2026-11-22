@@ -72,7 +72,7 @@ sitecheck run --json --strict
 sitecheck run --only http,seo,structured_data,ai --json
 ```
 
-`sitecheck run` exits non-zero when any check fails (or on warnings when `--strict` is set). Each JSON finding includes a stable `rule` ID, `items` listing the affected URLs or headers, and a `docs_url` pointing to the relevant specification so coding agents and CI jobs can act on failures without scraping terminal text.
+`sitecheck run` exits non-zero when any check fails (or on warnings when `--strict` is set). Deterministic rule findings include a stable `rule` ID, plus optional `items` (affected URLs, headers, or selectors) and `docs_url` (specification link) when applicable, so coding agents and CI jobs can act on failures without scraping terminal text.
 
 ## Adding a new check
 

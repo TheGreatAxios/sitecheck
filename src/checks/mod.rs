@@ -28,6 +28,7 @@ const IGNORED_INFORMATIVE_AUDITS: &[&str] = &[
 ];
 
 #[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MinScores {
     pub performance: Option<u8>,
     pub accessibility: Option<u8>,

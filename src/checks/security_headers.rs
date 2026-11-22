@@ -10,6 +10,7 @@ use crate::check::{Check, CheckContext, CheckError, CheckReport, Finding};
 const DOCS_SECURITY_TXT: &str = "https://www.rfc-editor.org/rfc/rfc9116";
 
 #[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SecurityHeadersConfig {
     #[serde(default)]
     pub check_security_txt: bool,

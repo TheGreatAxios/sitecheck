@@ -3,7 +3,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use tokio::process::Command;
 
-use crate::check::{Check, CheckContext, CheckError, CheckReport};
+use crate::check::{Check, CheckContext, CheckError, CheckReport, validate_http_url};
 use crate::checks::{MinScores, parse_lighthouse_result};
 
 fn default_binary() -> String {
@@ -15,6 +15,7 @@ fn default_form_factors() -> Vec<String> {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LighthouseConfig {
     #[serde(default = "default_binary")]
     pub binary: String,
@@ -44,6 +45,7 @@ impl Check for LighthouseCheck {
     }
 
     async fn run(&self, ctx: &CheckContext) -> Result<CheckReport, CheckError> {
+        validate_http_url(&ctx.base_url)?;
         let mut findings = Vec::new();
 
         for form_factor in &self.config.form_factors {
