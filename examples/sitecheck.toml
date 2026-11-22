@@ -1,0 +1,67 @@
+url = "https://example.com/"
+
+# Per-rule severity overrides ("off", "warn", "error")
+[rules]
+"seo/apple-touch-icon" = "warn"
+"security/csp" = "error"
+"http/llms-txt" = "off"
+
+[http]
+check_www_redirect = true
+check_https_redirect = true
+check_soft_404 = true
+check_html_size = true
+check_head_validity = true
+check_trailing_slash = true
+check_canonical = true
+check_sitemap = true
+check_robots = true
+require_content_signal = false
+allow_noindex = []
+max_sitemap_urls = 15
+check_llms_txt = true
+
+[seo]
+check_favicon = true
+max_sitemap_urls = 15
+
+[security_headers]
+check_security_txt = false
+
+[structured_data]
+required_types = ["Organization", "WebSite"]
+check_site_name = true
+check_open_graph = true
+check_twitter = true
+
+[ai]
+allow_blocked = []
+
+# [indexnow]
+# key = "your-indexnow-key"
+# key_location = "https://example.com/your-indexnow-key.txt"
+
+# [pagespeed]
+# strategies = ["mobile", "desktop"]
+# api_key_env = "PSI_API_KEY"
+# [pagespeed.min_scores]
+# performance = 90
+# accessibility = 95
+# best_practices = 95
+# seo = 95
+
+# [lighthouse]
+# form_factors = ["mobile"]
+# [lighthouse.min_scores]
+# performance = 90
+# seo = 95
+
+# [axe]
+# bin = "axe"
+# tags = ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]
+# paths = ["/"]
+
+# [search_console]
+# site_url = "https://example.com/"
+# service_account_env = "GOOGLE_APPLICATION_CREDENTIALS"
+# inspect_urls = ["https://example.com/"]
