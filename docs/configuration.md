@@ -51,7 +51,7 @@ Checks HTTP status codes, redirects, HTML size, `<head>` validity, canonical tag
 | `allow_noindex` | `string[]` | `[]` | Paths permitted to declare `noindex` |
 | `max_sitemap_urls` | `usize` | `15` | Maximum sitemap URLs sampled for indexability checks |
 | `check_llms_txt` | `bool` | `true` | Validate `/llms.txt` structure (H1 heading and Markdown links) |
-| `extra_paths` | `string[]` | `[]` | Additional paths to probe beyond the homepage and sitemap sample |
+| `extra_paths` | `string[]` | `[]` | Paths to probe for trailing-slash redirects (when non-empty, overrides the sitemap sample) |
 
 ## `[seo]`
 
@@ -126,7 +126,7 @@ Runs `@axe-core/cli` against configured paths to check WCAG accessibility rules.
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `bin` | `string` | `"axe"` | Path or name of the axe CLI executable (bypasses `npx` fallback when set) |
+| `bin` | `string` | `None` | Path or name of the axe CLI executable (defaults to searching `PATH` for `axe`, then falling back to `npx --yes @axe-core/cli`; setting `bin = "axe"` explicitly disables the `npx` fallback) |
 | `tags` | `string[]` | `["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]` | axe rule tags to evaluate |
 | `paths` | `string[]` | `["/"]` | Site paths to audit |
 
@@ -138,7 +138,7 @@ Queries Google Search Console sitemaps and URL Inspection APIs using a Google Cl
 | --- | --- | --- | --- |
 | `site_url` | `string` | top-level `url` | Search Console property (URL prefix or `sc-domain:example.com`) |
 | `service_account_env` | `string` | `"GOOGLE_APPLICATION_CREDENTIALS"` | Env var pointing to a service account JSON file path or inline JSON |
-| `inspect_urls` | `string[]` | `[]` | URLs to submit to the URL Inspection API |
+| `inspect_urls` | `string[]` | `[]` | URLs to submit to the URL Inspection API (defaults to inspecting the site's homepage `url` when empty) |
 
 ## Environment Variables
 

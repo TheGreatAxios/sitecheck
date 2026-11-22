@@ -630,14 +630,7 @@ pub(crate) fn urls_match(a: &str, b: &str) -> bool {
     }
 }
 
-/// Returns `true` when `target` shares the same scheme, host, and port as `base`.
-#[must_use]
-pub fn is_same_origin(base: &Url, target: &Url) -> bool {
-    base.scheme().eq_ignore_ascii_case(target.scheme())
-        && base.host_str().is_some()
-        && base.host_str() == target.host_str()
-        && base.port_or_known_default() == target.port_or_known_default()
-}
+pub use crate::check::is_same_origin;
 
 async fn check_www_redirect(ctx: &CheckContext) -> Finding {
     let Some(host) = ctx.base_url.host_str() else {
@@ -1117,7 +1110,7 @@ async fn check_sitemap_urls(
             issues.push(format!("{loc}: blocked by robots.txt"));
         }
 
-        let resp = match ctx.client.get(parsed.clone()).send().await {
+        let resp = match ctx.same_origin_client.get(parsed.clone()).send().await {
             Ok(r) => r,
             Err(err) => {
                 issues.push(format!("{loc}: request failed ({err})"));

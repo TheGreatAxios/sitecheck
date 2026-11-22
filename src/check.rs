@@ -21,6 +21,15 @@ pub(crate) fn validate_http_url(url: &Url) -> Result<(), CheckError> {
     }
 }
 
+/// Returns `true` when `target` shares the same scheme, host, and port as `base`.
+#[must_use]
+pub fn is_same_origin(base: &Url, target: &Url) -> bool {
+    base.scheme().eq_ignore_ascii_case(target.scheme())
+        && base.host_str().is_some()
+        && base.host_str() == target.host_str()
+        && base.port_or_known_default() == target.port_or_known_default()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
@@ -167,6 +176,7 @@ pub struct CheckContext {
     pub base_url: Url,
     pub client: reqwest::Client,
     pub no_redirect_client: reqwest::Client,
+    pub same_origin_client: reqwest::Client,
 }
 
 impl CheckContext {
@@ -186,10 +196,27 @@ impl CheckContext {
             .redirect(Policy::none())
             .build()?;
 
+        let origin_url = base_url.clone();
+        let same_origin_client = reqwest::Client::builder()
+            .user_agent(USER_AGENT)
+            .connect_timeout(CONNECT_TIMEOUT)
+            .timeout(REQUEST_TIMEOUT)
+            .redirect(Policy::custom(move |attempt| {
+                if attempt.previous().len() >= 10 {
+                    attempt.error("too many redirects")
+                } else if is_same_origin(&origin_url, attempt.url()) {
+                    attempt.follow()
+                } else {
+                    attempt.stop()
+                }
+            }))
+            .build()?;
+
         Ok(Self {
             base_url,
             client,
             no_redirect_client,
+            same_origin_client,
         })
     }
 }

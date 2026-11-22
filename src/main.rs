@@ -41,7 +41,7 @@ enum Command {
         #[arg(long, default_value = "sitecheck.toml")]
         output: PathBuf,
     },
-    /// List all built-in deterministic rules and their default severities.
+    /// List all cataloged rules (built-in checks and optional adapters) and their default severities.
     Rules,
 }
 

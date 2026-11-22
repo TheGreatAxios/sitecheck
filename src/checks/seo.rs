@@ -742,7 +742,7 @@ async fn check_sitemap_duplicates(
                 ));
                 continue;
             }
-            let Ok(page_resp) = ctx.client.get(parsed).send().await else {
+            let Ok(page_resp) = ctx.same_origin_client.get(parsed).send().await else {
                 continue;
             };
             if !page_resp.status().is_success() {
@@ -766,7 +766,7 @@ async fn check_sitemap_duplicates(
                     off_origin.len()
                 )),
             )
-            .with_rule("http/sitemap-indexability")
+            .with_rule("seo/sitemap-duplicates")
             .with_items(off_origin),
         );
     }
