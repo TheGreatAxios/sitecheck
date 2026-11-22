@@ -5,7 +5,10 @@ use serde::Deserialize;
 use serde_json::Value;
 use url::form_urlencoded;
 
-use crate::check::{Check, CheckContext, CheckError, CheckReport};
+use crate::check::{
+    Check, CheckContext, CheckError, CheckReport, MAX_HTML_BODY_BYTES, MAX_TEXT_BODY_BYTES,
+    read_body_limited,
+};
 use crate::checks::{MinScores, parse_lighthouse_result};
 
 const PSI_ENDPOINT: &str = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed";
@@ -117,7 +120,9 @@ impl Check for PageSpeedCheck {
                 })?;
             let status = resp.status();
             if !status.is_success() {
-                let raw_body = resp.text().await.unwrap_or_default();
+                let raw_body = read_body_limited(resp, MAX_TEXT_BODY_BYTES)
+                    .await
+                    .unwrap_or_default();
                 let body = redact_api_key(&raw_body, api_key.as_deref());
                 let hint = if api_key.is_none() {
                     format!(" (hint: set `{}` env var)", self.config.api_key_env)
@@ -129,7 +134,15 @@ impl Check for PageSpeedCheck {
                 )));
             }
 
-            let payload: Value = resp.json().await.map_err(|err| {
+            let body = read_body_limited(resp, MAX_HTML_BODY_BYTES)
+                .await
+                .map_err(|err| {
+                    CheckError::Other(format!(
+                        "failed to read PageSpeed Insights response for {strategy}: {}",
+                        redact_api_key(&err.to_string(), api_key.as_deref())
+                    ))
+                })?;
+            let payload: Value = serde_json::from_str(&body).map_err(|err| {
                 CheckError::Other(format!(
                     "failed to decode PageSpeed Insights response for {strategy}: {}",
                     redact_api_key(&err.to_string(), api_key.as_deref())

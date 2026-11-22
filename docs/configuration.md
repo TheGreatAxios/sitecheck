@@ -76,7 +76,7 @@ Parses `<script type="application/ld+json">` blocks and social metadata tags.
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `required_types` | `string[]` | `[]` | Schema.org `@type` values that must appear on the homepage |
+| `required_types` | `string[]` | `[]` | Schema.org `@type` values that must appear on each inspected path |
 | `check_site_name` | `bool` | `true` | Check for `WebSite` JSON-LD with a valid `name` |
 | `check_open_graph` | `bool` | `true` | Verify Open Graph (`og:*`) meta tags |
 | `check_twitter` | `bool` | `true` | Verify Twitter Card (`twitter:*`) meta tags |

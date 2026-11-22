@@ -8,7 +8,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use url::{Url, form_urlencoded};
 
-use crate::check::{Check, CheckContext, CheckError, CheckReport, Finding};
+use crate::check::{
+    Check, CheckContext, CheckError, CheckReport, Finding, MAX_HTML_BODY_BYTES,
+    MAX_TEXT_BODY_BYTES, read_body_limited,
+};
 
 const DEFAULT_TOKEN_URI: &str = "https://oauth2.googleapis.com/token";
 const WEBMASTERS_SCOPE: &str = "https://www.googleapis.com/auth/webmasters.readonly";
@@ -133,13 +136,16 @@ async fn exchange_jwt_for_token(
 
     let status = resp.status();
     if !status.is_success() {
-        let body = resp.text().await.unwrap_or_default();
+        let body = read_body_limited(resp, MAX_TEXT_BODY_BYTES)
+            .await
+            .unwrap_or_default();
         return Err(CheckError::Other(format!(
             "Google OAuth2 token exchange failed (HTTP {status}): {body}"
         )));
     }
 
-    let token: TokenResponse = resp.json().await?;
+    let body = read_body_limited(resp, MAX_TEXT_BODY_BYTES).await?;
+    let token: TokenResponse = serde_json::from_str(&body)?;
     Ok(token.access_token)
 }
 
@@ -158,13 +164,16 @@ async fn check_sitemaps(
         .await?;
     let status = resp.status();
     if !status.is_success() {
-        let body = resp.text().await.unwrap_or_default();
+        let body = read_body_limited(resp, MAX_TEXT_BODY_BYTES)
+            .await
+            .unwrap_or_default();
         return Err(CheckError::Other(format!(
             "GSC sitemaps API returned HTTP {status}: {body}"
         )));
     }
 
-    let payload: Value = resp.json().await?;
+    let body = read_body_limited(resp, MAX_HTML_BODY_BYTES).await?;
+    let payload: Value = serde_json::from_str(&body)?;
     let sitemaps = payload
         .get("sitemap")
         .and_then(Value::as_array)
@@ -247,13 +256,16 @@ async fn inspect_url(
 
     let status = resp.status();
     if !status.is_success() {
-        let body = resp.text().await.unwrap_or_default();
+        let body = read_body_limited(resp, MAX_TEXT_BODY_BYTES)
+            .await
+            .unwrap_or_default();
         return Err(CheckError::Other(format!(
             "GSC URL Inspection API returned HTTP {status} for {inspection_url}: {body}"
         )));
     }
 
-    let payload: Value = resp.json().await?;
+    let body = read_body_limited(resp, MAX_HTML_BODY_BYTES).await?;
+    let payload: Value = serde_json::from_str(&body)?;
     let index_status = payload
         .get("inspectionResult")
         .and_then(|r| r.get("indexStatusResult"));
