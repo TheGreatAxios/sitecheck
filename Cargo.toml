@@ -9,7 +9,7 @@ documentation = "https://docs.rs/sitecheck"
 readme = "README.md"
 keywords = ["seo", "accessibility", "audit", "cli", "lighthouse"]
 categories = ["command-line-utilities", "web-programming"]
-exclude = [".github/"]
+exclude = [".github/", "docs/"]
 
 [dependencies]
 async-trait = "0.1"

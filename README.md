@@ -5,7 +5,15 @@
 [![docs.rs](https://docs.rs/sitecheck/badge.svg)](https://docs.rs/sitecheck)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 
-`sitecheck` is a config-driven CLI with 48 built-in deterministic rules for auditing websites. It checks HTTP crawling and indexing, SEO metadata, Safari/iOS icons and web manifests, security headers and RFC 9116 `security.txt`, JSON-LD structured data, and AI crawler `robots.txt` directives. Optional adapters also run IndexNow, PageSpeed Insights, Lighthouse, axe-core, and Google Search Console checks from the same `sitecheck.toml` file.
+Config-driven CLI with 48 deterministic rules for auditing websites—HTTP redirects, SEO, security headers, structured data, and AI crawlers.
+
+## What It Checks
+
+- **HTTP & Crawling:** `www`→apex and HTTPS 301s, trailing slashes, soft-404 probe, `<head>` validity, Googlebot 2 MB HTML cutoff, `robots.txt`, `sitemap.xml` indexability, `llms.txt`
+- **SEO & Discovery:** canonical in `<head>`, unique titles and descriptions, raster favicon and Apple touch icon, web manifest, AI search vs. training bot `robots.txt` rules
+- **Security & Structured Data:** HSTS, CSP, COOP, `X-Content-Type-Options`, `Referrer-Policy`, RFC 9116 `security.txt`, JSON-LD (`WebSite` Site Name, retired schema warnings, `sameAs`), Open Graph and Twitter Cards
+- **Optional adapters:** IndexNow, PageSpeed Insights, Lighthouse, axe-core, Google Search Console
+- **Built for CI & coding agents:** `[rules]` severity overrides (`off`/`warn`/`error`), `--json`, `--strict`
 
 ## Quickstart
 
@@ -13,6 +21,8 @@
 cargo install sitecheck
 sitecheck init https://example.com/
 sitecheck run
+sitecheck run --json --strict
+sitecheck rules
 ```
 
 Sample output:
@@ -23,18 +33,12 @@ sitecheck https://example.com/
 [PASS] http
   [PASS] http/homepage-status — Homepage returned HTTP 200
   [PASS] http/robots-txt — /robots.txt is reachable and declares a Sitemap
-
 [WARN] security_headers
   [WARN] security/csp — Missing Content-Security-Policy header
-
 Result: PASSED (2 pass, 1 warn, 0 fail)
 ```
 
-List all 48 built-in rules and their default severities with `sitecheck rules`.
-
-## Configuration and `[rules]` overrides
-
-Every deterministic rule has a stable `category/rule-name` ID that you can override under `[rules]` to `"off"`, `"warn"`, or `"error"`. See [`examples/sitecheck.toml`](examples/sitecheck.toml) for the full commented reference.
+Override any built-in rule severity in `sitecheck.toml`:
 
 ```toml
 url = "https://example.com/"
@@ -45,40 +49,16 @@ url = "https://example.com/"
 "http/llms-txt" = "off"
 
 [http]
-check_canonical = true
-check_robots = true
-check_sitemap = true
-
 [seo]
-check_favicon = true
-
 [security_headers]
-check_security_txt = false
-
-[structured_data]
-required_types = ["Organization", "WebSite"]
-
-[ai]
-allow_blocked = []
 ```
 
-## Using with coding agents and CI
+## Documentation
 
-```sh
-# Machine-readable JSON, failing on both errors and warnings
-sitecheck run --json --strict
-
-# Run a targeted subset of modules during a fix loop
-sitecheck run --only http,seo,structured_data,ai --json
-```
-
-`sitecheck run` exits non-zero when any check fails (or on warnings when `--strict` is set). Deterministic rule findings include a stable `rule` ID, plus optional `items` (affected URLs, headers, or selectors) and `docs_url` (specification link) when applicable, so coding agents and CI jobs can act on failures without scraping terminal text.
-
-## Adding a new check
-
-1. Create `src/checks/<name>.rs` with a config struct and a check type implementing `crate::check::Check`.
-2. Attach stable `category/rule-name` IDs via `Finding::with_rule(...)` and register them in `BUILTIN_RULES` (`src/rules.rs`).
-3. Add `pub <name>: Option<...>` to `Config` in `src/config.rs` and register it in `Config::enabled_checks()`.
+- [Configuration reference](docs/configuration.md) — all `sitecheck.toml` sections, rule overrides, and environment variables
+- [Extending & agent loops](docs/extending.md) — adding a check module and running `--json --strict` in CI or coding agents
+- [Example config](examples/sitecheck.toml) — complete commented starter file
+- [API documentation](https://docs.rs/sitecheck) — Rust crate reference on docs.rs
 
 ## License
 
