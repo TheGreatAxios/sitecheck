@@ -1,13 +1,21 @@
 # sitecheck
 
 [![CI](https://github.com/TheGreatAxios/sitecheck/actions/workflows/ci.yml/badge.svg)](https://github.com/TheGreatAxios/sitecheck/actions/workflows/ci.yml)
+[![Crates.io](https://img.shields.io/crates/v/sitecheck.svg)](https://crates.io/crates/sitecheck)
+[![docs.rs](https://docs.rs/sitecheck/badge.svg)](https://docs.rs/sitecheck)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 
 A single-config CLI to audit live websites for HTTP, SEO, security headers, structured data, and AI crawler readiness.
 
 ## Quickstart
 
-Install from source (`cargo install sitecheck` will work once published to crates.io):
+Install from [crates.io](https://crates.io/crates/sitecheck):
+
+```sh
+cargo install sitecheck
+```
+
+Or install from source:
 
 ```sh
 git clone https://github.com/TheGreatAxios/sitecheck.git
@@ -71,7 +79,7 @@ Built-in checks cover 46 rules. A check runs when its `[section]` appears in `si
 - [Configuration reference](docs/configuration.md): all `sitecheck.toml` sections, rule overrides, and environment variables.
 - [Extending and agent loops](docs/extending.md): writing check modules and running `--json --strict` in CI.
 - [Example config](examples/sitecheck.toml): commented starter file.
-- Rust API docs: run `cargo doc --no-deps --open`.
+- [API docs on docs.rs](https://docs.rs/sitecheck) (or build locally with `cargo doc --no-deps --open`).
 
 ## License
 
