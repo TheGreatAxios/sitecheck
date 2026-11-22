@@ -1,5 +1,6 @@
-//! Config-driven website auditor with 48 deterministic rules for HTTP redirects,
-//! SEO, security headers, structured data, and AI crawlers.
+//! Config-driven website auditor with 46 built-in HTTP, SEO, security,
+//! structured data, and AI crawler rules, plus optional adapters for `IndexNow`,
+//! `PageSpeed` Insights, Lighthouse, axe-core, and Google Search Console.
 //!
 //! `sitecheck` is primarily used as a CLI (`sitecheck init`, `sitecheck run`,
 //! `sitecheck rules`), and also exposes its configuration, check trait, rule

@@ -118,6 +118,7 @@ impl Check for PageSpeedCheck {
 
             findings.extend(parse_lighthouse_result(
                 lhr,
+                self.name(),
                 strategy,
                 &self.config.min_scores,
             )?);

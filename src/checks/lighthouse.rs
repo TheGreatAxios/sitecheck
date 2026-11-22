@@ -80,6 +80,7 @@ impl Check for LighthouseCheck {
             let lhr: Value = serde_json::from_slice(&output.stdout)?;
             findings.extend(parse_lighthouse_result(
                 &lhr,
+                self.name(),
                 form_factor,
                 &self.config.min_scores,
             )?);

@@ -630,6 +630,15 @@ pub(crate) fn urls_match(a: &str, b: &str) -> bool {
     }
 }
 
+/// Returns `true` when `target` shares the same scheme, host, and port as `base`.
+#[must_use]
+pub fn is_same_origin(base: &Url, target: &Url) -> bool {
+    base.scheme().eq_ignore_ascii_case(target.scheme())
+        && base.host_str().is_some()
+        && base.host_str() == target.host_str()
+        && base.port_or_known_default() == target.port_or_known_default()
+}
+
 async fn check_www_redirect(ctx: &CheckContext) -> Finding {
     let Some(host) = ctx.base_url.host_str() else {
         return Finding::warn(
@@ -851,7 +860,7 @@ async fn check_trailing_slash_paths(
         for loc in sitemap_locs {
             if let Ok(parsed) = Url::parse(loc)
                 && parsed.path() != "/"
-                && parsed.host_str() == ctx.base_url.host_str()
+                && is_same_origin(&ctx.base_url, &parsed)
             {
                 candidate_urls.push(parsed);
                 if candidate_urls.len() >= 3 {
@@ -1083,9 +1092,11 @@ async fn check_sitemap_urls(
     max_urls: usize,
     robots: &RobotsRules,
     allow_noindex: &[String],
-) -> Finding {
+) -> Vec<Finding> {
     let sampled: Vec<&String> = sitemap_locs.iter().take(max_urls).collect();
     let mut issues = Vec::new();
+    let mut off_origin = Vec::new();
+    let mut checked = 0usize;
 
     for loc in &sampled {
         let Ok(parsed) = Url::parse(loc) else {
@@ -1093,6 +1104,15 @@ async fn check_sitemap_urls(
             continue;
         };
 
+        if !is_same_origin(&ctx.base_url, &parsed) {
+            off_origin.push(format!(
+                "{loc}: skipped off-origin URL (expected same origin as {})",
+                ctx.base_url
+            ));
+            continue;
+        }
+
+        checked += 1;
         if robots.is_disallowed(parsed.path()) {
             issues.push(format!("{loc}: blocked by robots.txt"));
         }
@@ -1125,29 +1145,48 @@ async fn check_sitemap_urls(
         }
     }
 
-    if issues.is_empty() {
-        Finding::pass(
-            "sitemap URLs indexability",
-            Some(format!(
-                "checked {} of {} URL(s): all 200, crawlable, indexable",
-                sampled.len(),
-                sitemap_locs.len()
-            )),
-        )
-        .with_rule("http/sitemap-indexability")
-    } else {
-        Finding::fail(
-            "sitemap URLs indexability",
-            Some(format!(
-                "{} issue(s) across {} sampled sitemap URL(s)",
-                issues.len(),
-                sampled.len()
-            )),
-        )
-        .with_rule("http/sitemap-indexability")
-        .with_items(issues)
-        .with_docs(DOCS_NOINDEX)
+    let mut findings = Vec::new();
+    if !off_origin.is_empty() {
+        findings.push(
+            Finding::warn(
+                "sitemap off-origin URLs",
+                Some(format!(
+                    "skipped {} off-origin `<loc>` URL(s) without fetching",
+                    off_origin.len()
+                )),
+            )
+            .with_rule("http/sitemap-indexability")
+            .with_items(off_origin),
+        );
     }
+
+    if issues.is_empty() {
+        findings.push(
+            Finding::pass(
+                "sitemap URLs indexability",
+                Some(format!(
+                    "checked {checked} of {} URL(s): all 200, crawlable, indexable",
+                    sitemap_locs.len()
+                )),
+            )
+            .with_rule("http/sitemap-indexability"),
+        );
+    } else {
+        findings.push(
+            Finding::fail(
+                "sitemap URLs indexability",
+                Some(format!(
+                    "{} issue(s) across {checked} checked sitemap URL(s)",
+                    issues.len()
+                )),
+            )
+            .with_rule("http/sitemap-indexability")
+            .with_items(issues)
+            .with_docs(DOCS_NOINDEX),
+        );
+    }
+
+    findings
 }
 
 async fn check_llms_txt(ctx: &CheckContext) -> Finding {
@@ -1261,7 +1300,7 @@ async fn check_sitemap(
     }
 
     if config.max_sitemap_urls > 0 {
-        findings.push(
+        findings.extend(
             check_sitemap_urls(
                 ctx,
                 &sitemap_locs,
@@ -1385,10 +1424,13 @@ impl Check for HttpCheck {
 
 #[cfg(test)]
 mod tests {
+    use url::Url;
+
     use super::{
         HTML_SIZE_FAIL_BYTES, HTML_SIZE_WARN_BYTES, RobotsRules, extract_canonical,
         extract_sitemap_locs, find_invalid_head_tags, has_content_signal, has_noindex,
-        is_path_allowed_noindex, validate_head, validate_html_size, validate_llms_txt,
+        is_path_allowed_noindex, is_same_origin, validate_head, validate_html_size,
+        validate_llms_txt,
     };
     use crate::check::Severity;
 
@@ -1519,5 +1561,26 @@ mod tests {
             "https://example.com/about",
             &["/draft".to_owned()]
         ));
+    }
+
+    #[test]
+    fn enforces_same_origin_for_sitemap_urls() {
+        let base = Url::parse("https://example.com/").expect("valid base url");
+        let same = Url::parse("https://example.com/about").expect("valid same-origin url");
+        let explicit_default_port =
+            Url::parse("https://example.com:443/docs").expect("valid default-port url");
+        let different_scheme = Url::parse("http://example.com/about").expect("valid http url");
+        let different_port =
+            Url::parse("https://example.com:8443/about").expect("valid alt-port url");
+        let cross_origin = Url::parse("https://evil.example.net/").expect("valid cross-origin");
+        let metadata =
+            Url::parse("http://169.254.169.254/latest/meta-data/").expect("valid metadata url");
+
+        assert!(is_same_origin(&base, &same));
+        assert!(is_same_origin(&base, &explicit_default_port));
+        assert!(!is_same_origin(&base, &different_scheme));
+        assert!(!is_same_origin(&base, &different_port));
+        assert!(!is_same_origin(&base, &cross_origin));
+        assert!(!is_same_origin(&base, &metadata));
     }
 }

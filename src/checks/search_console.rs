@@ -160,10 +160,13 @@ async fn check_sitemaps(
         .map_or(&[][..], Vec::as_slice);
 
     if sitemaps.is_empty() {
-        return Ok(vec![Finding::fail(
-            "GSC sitemaps",
-            Some(format!("no sitemaps submitted for {site_url}")),
-        )]);
+        return Ok(vec![
+            Finding::fail(
+                "GSC sitemaps",
+                Some(format!("no sitemaps submitted for {site_url}")),
+            )
+            .with_rule("gsc/sitemap"),
+        ]);
     }
 
     let mut findings = Vec::new();
@@ -186,20 +189,29 @@ async fn check_sitemaps(
             .unwrap_or(0);
 
         if errors > 0 {
-            findings.push(Finding::fail(
-                format!("GSC sitemap {path}"),
-                Some(format!("{errors} error(s), {warnings} warning(s)")),
-            ));
+            findings.push(
+                Finding::fail(
+                    format!("GSC sitemap {path}"),
+                    Some(format!("{errors} error(s), {warnings} warning(s)")),
+                )
+                .with_rule("gsc/sitemap"),
+            );
         } else if warnings > 0 {
-            findings.push(Finding::warn(
-                format!("GSC sitemap {path}"),
-                Some(format!("{warnings} warning(s)")),
-            ));
+            findings.push(
+                Finding::warn(
+                    format!("GSC sitemap {path}"),
+                    Some(format!("{warnings} warning(s)")),
+                )
+                .with_rule("gsc/sitemap"),
+            );
         } else {
-            findings.push(Finding::pass(
-                format!("GSC sitemap {path}"),
-                Some("0 errors, 0 warnings".to_owned()),
-            ));
+            findings.push(
+                Finding::pass(
+                    format!("GSC sitemap {path}"),
+                    Some("0 errors, 0 warnings".to_owned()),
+                )
+                .with_rule("gsc/sitemap"),
+            );
         }
     }
 
@@ -236,10 +248,13 @@ async fn inspect_url(
         .and_then(|r| r.get("indexStatusResult"));
 
     let Some(index_status) = index_status else {
-        return Ok(vec![Finding::warn(
-            format!("GSC inspect {inspection_url}"),
-            Some("response missing `indexStatusResult`".to_owned()),
-        )]);
+        return Ok(vec![
+            Finding::warn(
+                format!("GSC inspect {inspection_url}"),
+                Some("response missing `indexStatusResult`".to_owned()),
+            )
+            .with_rule("gsc/index"),
+        ]);
     };
 
     let verdict = index_status
@@ -265,7 +280,8 @@ async fn inspect_url(
             format!("GSC coverage {inspection_url}"),
             Some(format!("{verdict}: {coverage}")),
         ),
-    };
+    }
+    .with_rule("gsc/index");
     findings.push(coverage_finding);
 
     let google_canonical = index_status.get("googleCanonical").and_then(Value::as_str);
@@ -273,17 +289,23 @@ async fn inspect_url(
 
     if let (Some(g_can), Some(u_can)) = (google_canonical, user_canonical) {
         if g_can == u_can {
-            findings.push(Finding::pass(
-                format!("GSC canonical {inspection_url}"),
-                Some(format!("Google matches user canonical ({g_can})")),
-            ));
+            findings.push(
+                Finding::pass(
+                    format!("GSC canonical {inspection_url}"),
+                    Some(format!("Google matches user canonical ({g_can})")),
+                )
+                .with_rule("gsc/canonical"),
+            );
         } else {
-            findings.push(Finding::fail(
-                format!("GSC canonical {inspection_url}"),
-                Some(format!(
-                    "Google selected `{g_can}`, user declared `{u_can}`"
-                )),
-            ));
+            findings.push(
+                Finding::fail(
+                    format!("GSC canonical {inspection_url}"),
+                    Some(format!(
+                        "Google selected `{g_can}`, user declared `{u_can}`"
+                    )),
+                )
+                .with_rule("gsc/canonical"),
+            );
         }
     }
 

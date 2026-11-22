@@ -3,7 +3,7 @@ use std::fmt::Write as _;
 
 use serde::Serialize;
 
-use crate::check::{CheckContext, CheckError, CheckReport, Severity};
+use crate::check::{Check, CheckContext, CheckError, CheckReport, Finding, Severity};
 use crate::config::{Config, RuleLevel};
 
 #[derive(Debug, Serialize)]
@@ -51,6 +51,40 @@ pub fn apply_rule_overrides(report: &mut CheckReport, rules: &BTreeMap<String, R
     });
 }
 
+async fn execute_checks(
+    ctx: &CheckContext,
+    checks: Vec<Box<dyn Check>>,
+    rules: &BTreeMap<String, RuleLevel>,
+    strict: bool,
+) -> RunSummary {
+    let mut reports = Vec::with_capacity(checks.len());
+    for check in checks {
+        let name = check.name();
+        let mut report = match check.run(ctx).await {
+            Ok(report) => report,
+            Err(err) => CheckReport::new(
+                name,
+                vec![
+                    Finding::fail(format!("{name} check error"), Some(err.to_string()))
+                        .with_rule(format!("{name}/error")),
+                ],
+            ),
+        };
+        apply_rule_overrides(&mut report, rules);
+        reports.push(report);
+    }
+
+    let has_failures = reports.iter().any(CheckReport::has_failures);
+    let has_warnings = reports.iter().any(CheckReport::has_warnings);
+    let passed = !(has_failures || strict && has_warnings);
+
+    RunSummary {
+        url: ctx.base_url.to_string(),
+        passed,
+        reports,
+    }
+}
+
 pub async fn run_checks(
     config: &Config,
     only: &[String],
@@ -81,22 +115,7 @@ pub async fn run_checks(
             .collect()
     };
 
-    let mut reports = Vec::with_capacity(selected.len());
-    for check in selected {
-        let mut report = check.run(&ctx).await?;
-        apply_rule_overrides(&mut report, &config.rules);
-        reports.push(report);
-    }
-
-    let has_failures = reports.iter().any(CheckReport::has_failures);
-    let has_warnings = reports.iter().any(CheckReport::has_warnings);
-    let passed = !(has_failures || strict && has_warnings);
-
-    Ok(RunSummary {
-        url: config.url.to_string(),
-        passed,
-        reports,
-    })
+    Ok(execute_checks(&ctx, selected, &config.rules, strict).await)
 }
 
 #[must_use]
@@ -166,8 +185,11 @@ pub fn format_text(summary: &RunSummary) -> String {
 mod tests {
     use std::collections::BTreeMap;
 
-    use super::{RunSummary, apply_rule_overrides, format_text};
-    use crate::check::{CheckReport, Finding, Severity};
+    use async_trait::async_trait;
+    use url::Url;
+
+    use super::{RunSummary, apply_rule_overrides, execute_checks, format_text};
+    use crate::check::{Check, CheckContext, CheckError, CheckReport, Finding, Severity};
     use crate::config::RuleLevel;
 
     #[test]
@@ -259,5 +281,64 @@ mod tests {
             report.findings[0].rule.as_deref(),
             Some("http/homepage-status")
         );
+    }
+
+    struct FailingCheck;
+    #[async_trait]
+    impl Check for FailingCheck {
+        fn name(&self) -> &'static str {
+            "pagespeed"
+        }
+
+        async fn run(&self, _ctx: &CheckContext) -> Result<CheckReport, CheckError> {
+            Err(CheckError::Config("missing PSI_API_KEY".to_owned()))
+        }
+    }
+
+    struct PassingCheck;
+    #[async_trait]
+    impl Check for PassingCheck {
+        fn name(&self) -> &'static str {
+            "http"
+        }
+
+        async fn run(&self, _ctx: &CheckContext) -> Result<CheckReport, CheckError> {
+            Ok(CheckReport::new(
+                self.name(),
+                vec![
+                    Finding::pass("homepage", Some("HTTP 200".to_owned()))
+                        .with_rule("http/homepage-status"),
+                ],
+            ))
+        }
+    }
+
+    #[tokio::test]
+    async fn isolates_check_errors_and_continues_remaining_checks() {
+        let ctx = CheckContext::new(Url::parse("https://example.com/").expect("valid url"))
+            .expect("valid context");
+        let checks: Vec<Box<dyn Check>> = vec![Box::new(FailingCheck), Box::new(PassingCheck)];
+
+        let summary = execute_checks(&ctx, checks, &BTreeMap::new(), false).await;
+
+        assert!(!summary.passed);
+        assert_eq!(summary.reports.len(), 2);
+        assert_eq!(summary.reports[0].name, "pagespeed");
+        assert_eq!(summary.reports[0].findings.len(), 1);
+        assert_eq!(summary.reports[0].findings[0].severity, Severity::Fail);
+        assert_eq!(
+            summary.reports[0].findings[0].rule.as_deref(),
+            Some("pagespeed/error")
+        );
+        assert!(
+            summary.reports[0].findings[0]
+                .detail
+                .as_deref()
+                .is_some_and(|d| d.contains("missing PSI_API_KEY"))
+        );
+
+        assert_eq!(summary.reports[1].name, "http");
+        assert_eq!(summary.reports[1].findings.len(), 1);
+        assert_eq!(summary.reports[1].findings[0].severity, Severity::Pass);
     }
 }

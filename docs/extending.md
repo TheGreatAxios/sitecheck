@@ -43,4 +43,4 @@ Each JSON report has the shape:
 }
 ```
 
-A coding agent can loop over `reports[].findings[]` where `severity != "pass"`, inspect `rule`, `detail`, `items` (affected URLs, headers, or selectors), and `docs_url`, apply a fix, and re-run `sitecheck run --only <module> --json --strict` until `passed` is `true` and exit code is `0`.
+Every finding includes `severity`, `rule`, and `title`; `detail`, `items` (affected URLs, headers, or selectors), and `docs_url` are included when applicable. A coding agent can loop over `reports[].findings[]` where `severity != "pass"`, inspect those fields, apply a fix, and re-run `sitecheck run --only <module> --json --strict` until `passed` is `true` and exit code is `0`.

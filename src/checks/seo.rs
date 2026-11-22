@@ -10,7 +10,7 @@ use url::Url;
 use crate::check::{Check, CheckContext, CheckError, CheckReport, Finding};
 use crate::checks::http::{
     extract_all_canonicals, extract_head, extract_robots_directives, extract_sitemap_locs,
-    parse_html_attr, urls_match,
+    is_same_origin, parse_html_attr, urls_match,
 };
 use crate::checks::structured_data::extract_meta_tags;
 
@@ -727,6 +727,7 @@ async fn check_sitemap_duplicates(
     }
 
     let mut pages = Vec::new();
+    let mut off_origin = Vec::new();
     for loc in locs.iter().take(max_urls) {
         let html = if urls_match(loc, ctx.base_url.as_str()) {
             home_html.to_owned()
@@ -734,6 +735,13 @@ async fn check_sitemap_duplicates(
             let Ok(parsed) = Url::parse(loc) else {
                 continue;
             };
+            if !is_same_origin(&ctx.base_url, &parsed) {
+                off_origin.push(format!(
+                    "{loc}: skipped off-origin URL (expected same origin as {})",
+                    ctx.base_url
+                ));
+                continue;
+            }
             let Ok(page_resp) = ctx.client.get(parsed).send().await else {
                 continue;
             };
@@ -748,11 +756,26 @@ async fn check_sitemap_duplicates(
         pages.push((loc.clone(), title, desc));
     }
 
-    if pages.len() <= 1 {
-        return Vec::new();
+    let mut findings = Vec::new();
+    if !off_origin.is_empty() {
+        findings.push(
+            Finding::warn(
+                "sitemap off-origin URLs",
+                Some(format!(
+                    "skipped {} off-origin `<loc>` URL(s) without fetching",
+                    off_origin.len()
+                )),
+            )
+            .with_rule("http/sitemap-indexability")
+            .with_items(off_origin),
+        );
     }
 
-    find_duplicate_metadata(&pages)
+    if pages.len() > 1 {
+        findings.extend(find_duplicate_metadata(&pages));
+    }
+
+    findings
 }
 
 #[async_trait]

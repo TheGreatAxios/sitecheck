@@ -174,7 +174,11 @@ fn extract_audit_items(audit: &Value) -> Vec<String> {
         })
 }
 
-fn collect_audit_findings(audits: &Map<String, Value>, strategy_label: &str) -> Vec<Finding> {
+fn collect_audit_findings(
+    audits: &Map<String, Value>,
+    rule_prefix: &str,
+    strategy_label: &str,
+) -> Vec<Finding> {
     let mut ranked: Vec<(u8, u8, String, Finding)> = audits
         .iter()
         .filter_map(|(key, audit)| {
@@ -250,7 +254,8 @@ fn collect_audit_findings(audits: &Map<String, Value>, strategy_label: &str) -> 
                 Severity::Fail => Finding::fail(title, Some(detail)),
                 Severity::Warn => Finding::warn(title, Some(detail)),
                 Severity::Pass => Finding::pass(title, Some(detail)),
-            };
+            }
+            .with_rule(format!("{rule_prefix}/{id}"));
             if let Some(docs) = description.and_then(extract_docs_url) {
                 finding = finding.with_docs(docs);
             }
@@ -276,6 +281,7 @@ fn collect_audit_findings(audits: &Map<String, Value>, strategy_label: &str) -> 
 /// Shared Lighthouse JSON result parser used by both `pagespeed` and `lighthouse` checks.
 pub fn parse_lighthouse_result(
     lhr: &Value,
+    rule_prefix: &str,
     strategy_label: &str,
     min_scores: &MinScores,
 ) -> Result<Vec<Finding>, CheckError> {
@@ -301,38 +307,39 @@ pub fn parse_lighthouse_result(
     ];
 
     for (key, label, min_threshold) in specs {
+        let rule_id = format!("{rule_prefix}/score-{key}");
         let Some(score) = categories
             .get(key)
             .and_then(|c| c.get("score"))
             .and_then(Value::as_f64)
         else {
             if let Some(min) = min_threshold {
-                findings.push(Finding::fail(
-                    format!("{strategy_label} {label}"),
-                    Some(format!("score missing (minimum {min})")),
-                ));
+                findings.push(
+                    Finding::fail(
+                        format!("{strategy_label} {label}"),
+                        Some(format!("score missing (minimum {min})")),
+                    )
+                    .with_rule(rule_id),
+                );
             }
             continue;
         };
 
         let pct = score_to_percent(score);
         let title = format!("{strategy_label} {label}");
-        match min_threshold {
-            Some(min) if pct < min => findings.push(Finding::fail(
-                title,
-                Some(format!("{pct}/100 (minimum {min})")),
-            )),
-            Some(min) => findings.push(Finding::pass(
-                title,
-                Some(format!("{pct}/100 (minimum {min})")),
-            )),
-            None if pct < 90 => findings.push(Finding::warn(title, Some(format!("{pct}/100")))),
-            None => findings.push(Finding::pass(title, Some(format!("{pct}/100")))),
-        }
+        let finding = match min_threshold {
+            Some(min) if pct < min => {
+                Finding::fail(title, Some(format!("{pct}/100 (minimum {min})")))
+            }
+            Some(min) => Finding::pass(title, Some(format!("{pct}/100 (minimum {min})"))),
+            None if pct < 90 => Finding::warn(title, Some(format!("{pct}/100"))),
+            None => Finding::pass(title, Some(format!("{pct}/100"))),
+        };
+        findings.push(finding.with_rule(rule_id));
     }
 
     if let Some(audits) = lhr.get("audits").and_then(Value::as_object) {
-        findings.extend(collect_audit_findings(audits, strategy_label));
+        findings.extend(collect_audit_findings(audits, rule_prefix, strategy_label));
     }
 
     Ok(findings)
@@ -384,27 +391,28 @@ mod tests {
             seo: Some(95),
         };
 
-        let findings = parse_lighthouse_result(&lhr, "mobile", &mins)
+        let findings = parse_lighthouse_result(&lhr, "pagespeed", "mobile", &mins)
             .expect("valid lighthouse JSON should parse");
 
-        assert!(
-            findings
-                .iter()
-                .any(|f| f.title == "mobile Performance" && f.severity == Severity::Fail)
-        );
-        assert!(
-            findings
-                .iter()
-                .any(|f| f.title == "mobile Accessibility" && f.severity == Severity::Pass)
-        );
-        assert!(
-            findings
-                .iter()
-                .any(|f| f.title == "mobile SEO" && f.severity == Severity::Pass)
-        );
+        assert!(findings.iter().any(|f| {
+            f.title == "mobile Performance"
+                && f.severity == Severity::Fail
+                && f.rule.as_deref() == Some("pagespeed/score-performance")
+        }));
+        assert!(findings.iter().any(|f| {
+            f.title == "mobile Accessibility"
+                && f.severity == Severity::Pass
+                && f.rule.as_deref() == Some("pagespeed/score-accessibility")
+        }));
+        assert!(findings.iter().any(|f| {
+            f.title == "mobile SEO"
+                && f.severity == Severity::Pass
+                && f.rule.as_deref() == Some("pagespeed/score-seo")
+        }));
         assert!(findings.iter().any(|f| {
             f.title == "mobile audit: Largest Contentful Paint"
                 && f.severity == Severity::Warn
+                && f.rule.as_deref() == Some("pagespeed/largest-contentful-paint")
                 && f.detail.as_deref() == Some("score 45/100 (3.2 s)")
         }));
         assert!(
@@ -456,14 +464,16 @@ mod tests {
             }
         });
 
-        let findings = parse_lighthouse_result(&lhr, "desktop", &MinScores::default())
-            .expect("valid lighthouse JSON should parse");
+        let findings =
+            parse_lighthouse_result(&lhr, "lighthouse", "desktop", &MinScores::default())
+                .expect("valid lighthouse JSON should parse");
 
         let contrast = findings
             .iter()
             .find(|f| f.title.contains("sufficient contrast ratio"))
             .expect("color-contrast finding should be present");
         assert_eq!(contrast.severity, Severity::Fail);
+        assert_eq!(contrast.rule.as_deref(), Some("lighthouse/color-contrast"));
         assert_eq!(
             contrast.detail.as_deref(),
             Some("score 0/100 — Low-contrast text is difficult to read.")
@@ -531,14 +541,16 @@ mod tests {
             }
         });
 
-        let findings = parse_lighthouse_result(&lhr, "desktop", &MinScores::default())
-            .expect("valid lighthouse JSON should parse");
+        let findings =
+            parse_lighthouse_result(&lhr, "lighthouse", "desktop", &MinScores::default())
+                .expect("valid lighthouse JSON should parse");
 
         let csp = findings
             .iter()
             .find(|f| f.title.contains("Ensure CSP is effective"))
             .expect("informative csp-xss insight should be surfaced");
         assert_eq!(csp.severity, Severity::Warn);
+        assert_eq!(csp.rule.as_deref(), Some("lighthouse/csp-xss"));
         assert_eq!(
             csp.detail.as_deref(),
             Some("A strong CSP reduces XSS risk.")

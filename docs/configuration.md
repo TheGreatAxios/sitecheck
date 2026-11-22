@@ -10,7 +10,7 @@ Only `url` is required at the top level. A check module runs when its `[section]
 
 ## `[rules]`
 
-Override the severity of any built-in rule by its `category/rule-name` ID. Run `sitecheck rules` to list all 48 built-in IDs and their defaults.
+Override the severity of any rule by its `category/rule-name` ID. Run `sitecheck rules` to list the 46 built-in HTTP/SEO/security/schema/AI rules plus the 2 cataloged optional adapter rules (`indexnow/key-file`, `axe/wcag`) and their default severities (`pass`, `warn`, or `fail`).
 
 | Value | Effect |
 | --- | --- |
@@ -25,7 +25,12 @@ Override the severity of any built-in rule by its `category/rule-name` ID. Run `
 "http/llms-txt" = "off"
 ```
 
-For `[axe]` findings (`axe/<violation-id>`), you can override a specific axe rule ID or set `"axe/wcag"` as a fallback for all axe findings.
+Optional adapters also attach rule IDs so `[rules]` works uniformly across all modules:
+- `[axe]`: `axe/<violation-id>`, with `"axe/wcag"` acting as a fallback for all `axe/*` findings.
+- `[pagespeed]`: `pagespeed/score-<category>` and `pagespeed/<audit-id>`.
+- `[lighthouse]`: `lighthouse/score-<category>` and `lighthouse/<audit-id>`.
+- `[search_console]`: `gsc/sitemap`, `gsc/index`, and `gsc/canonical`.
+- Check runtime errors: `<check-name>/error` (when a check returns an error, `sitecheck` records a `fail` finding and continues running remaining checks).
 
 ## `[http]`
 
@@ -106,7 +111,7 @@ Queries the Google PageSpeed Insights API and enforces minimum category scores (
 
 ## `[lighthouse]`
 
-Runs a local `lighthouse` CLI binary in headless Chrome and enforces minimum category scores (0–100).
+Runs a local `lighthouse` CLI binary in headless Chrome and enforces minimum category scores (0–100). When `[lighthouse]` is enabled, `sitecheck` launches Chrome with `--chrome-flags="--headless --no-sandbox"`.
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -117,11 +122,11 @@ Runs a local `lighthouse` CLI binary in headless Chrome and enforces minimum cat
 
 ## `[axe]`
 
-Runs `@axe-core/cli` against configured paths to check WCAG accessibility rules.
+Runs `@axe-core/cli` against configured paths to check WCAG accessibility rules. If `bin` is omitted and `axe` is not found on `PATH`, `sitecheck` falls back to running `npx --yes @axe-core/cli`, which downloads and runs the package via npm.
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `bin` | `string` | `"axe"` | Path or name of the axe CLI executable |
+| `bin` | `string` | `"axe"` | Path or name of the axe CLI executable (bypasses `npx` fallback when set) |
 | `tags` | `string[]` | `["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]` | axe rule tags to evaluate |
 | `paths` | `string[]` | `["/"]` | Site paths to audit |
 
