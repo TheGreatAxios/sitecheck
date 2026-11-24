@@ -5,7 +5,7 @@
 [![docs.rs](https://docs.rs/sitecheck/badge.svg)](https://docs.rs/sitecheck)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 
-A single-config CLI to audit live websites for HTTP, SEO, security headers, structured data, and AI crawler readiness.
+A single-config CLI to audit live websites for HTTP, SEO, security headers, structured data, AI crawler readiness, and WCAG accessibility.
 
 ## Quickstart
 
@@ -59,7 +59,7 @@ Override any rule severity (`off`, `warn`, or `error`) in `sitecheck.toml`:
 
 ## Checks
 
-Built-in checks cover 46 rules. A check runs when its `[section]` appears in `sitecheck.toml`.
+Built-in checks cover 47 cataloged rules (plus Clearway's built-in static WCAG 2.0/2.1/2.2 HTML rules under `[a11y]`). A check runs when its `[section]` appears in `sitecheck.toml`. `sitecheck init` enables all built-in sections by default.
 
 | Section | Type | What it checks |
 | --- | --- | --- |
@@ -68,10 +68,11 @@ Built-in checks cover 46 rules. A check runs when its `[section]` appears in `si
 | `[security_headers]` | Built-in | Security response headers and `security.txt` |
 | `[structured_data]` | Built-in | JSON-LD schemas, Open Graph, and Twitter Cards |
 | `[ai]` | Built-in | AI search and training bots in `robots.txt` |
+| `[a11y]` | Built-in | Static HTML WCAG 2.0/2.1/2.2 accessibility via Clearway (no browser required) |
 | `[indexnow]` | Opt-in | IndexNow verification key file availability |
 | `[pagespeed]` | Opt-in | Google PageSpeed Insights category scores |
 | `[lighthouse]` | Opt-in | Local Lighthouse runs in headless Chrome |
-| `[axe]` | Opt-in | WCAG accessibility audits via `@axe-core/cli` |
+| `[axe]` | Opt-in | Live-browser WCAG accessibility audits via `@axe-core/cli` (including computed-style contrast) |
 | `[search_console]` | Opt-in | Google Search Console sitemaps and URL inspection |
 
 ## Documentation

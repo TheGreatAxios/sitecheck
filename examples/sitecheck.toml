@@ -37,6 +37,12 @@ check_twitter = true
 [ai]
 allow_blocked = []
 
+[a11y]
+paths = ["/"]
+tags = ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]
+include_incomplete = false
+include_disabled = false
+
 # [indexnow]
 # key = "your-indexnow-key"
 # key_location = "https://example.com/your-indexnow-key.txt"

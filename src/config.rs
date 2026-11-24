@@ -7,6 +7,7 @@ use thiserror::Error;
 use url::Url;
 
 use crate::check::Check;
+use crate::checks::a11y::{A11yCheck, A11yConfig};
 use crate::checks::ai::{AiCheck, AiConfig};
 use crate::checks::axe::{AxeCheck, AxeConfig};
 use crate::checks::http::{HttpCheck, HttpConfig};
@@ -45,6 +46,7 @@ pub struct Config {
     pub security_headers: Option<SecurityHeadersConfig>,
     pub structured_data: Option<StructuredDataConfig>,
     pub ai: Option<AiConfig>,
+    pub a11y: Option<A11yConfig>,
     pub indexnow: Option<IndexNowConfig>,
     pub pagespeed: Option<PageSpeedConfig>,
     pub lighthouse: Option<LighthouseConfig>,
@@ -79,6 +81,9 @@ impl Config {
         }
         if let Some(cfg) = &self.ai {
             checks.push(Box::new(AiCheck::new(cfg.clone())));
+        }
+        if let Some(cfg) = &self.a11y {
+            checks.push(Box::new(A11yCheck::new(cfg.clone())));
         }
         if let Some(cfg) = &self.indexnow {
             checks.push(Box::new(IndexNowCheck::new(cfg.clone())));
@@ -135,6 +140,10 @@ check_twitter = true
 
 [ai]
 # allow_blocked = []
+
+[a11y]
+# paths = ["/"]
+# tags = ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]
 
 # [indexnow]
 # key = "your-indexnow-key"
@@ -198,6 +207,11 @@ required_types = ["Organization", "WebSite"]
 [ai]
 allow_blocked = ["ExaSearchBot"]
 
+[a11y]
+paths = ["/", "/about"]
+tags = ["wcag2a", "wcag2aa"]
+include_incomplete = true
+
 [indexnow]
 key = "abc123"
 
@@ -223,7 +237,7 @@ inspect_urls = ["https://example.com/"]
 
         let config = Config::parse(input).expect("valid TOML should parse");
         assert_eq!(config.url.as_str(), "https://example.com/");
-        assert_eq!(config.enabled_checks().len(), 10);
+        assert_eq!(config.enabled_checks().len(), 11);
         assert_eq!(
             config.rules.get("seo/apple-touch-icon"),
             Some(&RuleLevel::Off)
@@ -287,6 +301,7 @@ url = "https://example.com/"
         assert!(config.security_headers.is_some());
         assert!(config.structured_data.is_some());
         assert!(config.ai.is_some());
+        assert!(config.a11y.is_some());
     }
 
     #[test]

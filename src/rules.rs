@@ -290,6 +290,13 @@ pub const BUILTIN_RULES: &[RuleSpec] = &[
         default_severity: "pass",
         description: "Reports which AI training bots are disallowed vs allowed and whether Content-Signal is declared",
     },
+    // a11y
+    RuleSpec {
+        id: "a11y/wcag",
+        category: "a11y",
+        default_severity: "fail",
+        description: "Built-in Clearway static HTML WCAG 2.0/2.1/2.2 accessibility audit reports zero critical/serious violations",
+    },
     // indexnow (optional adapter)
     RuleSpec {
         id: "indexnow/key-file",
@@ -354,7 +361,7 @@ pub fn format_rules_catalog() -> String {
     let adapter_count = BUILTIN_RULES.len() - core_count;
     let _ = writeln!(
         out,
-        "\n{} cataloged rules ({core_count} built-in HTTP/SEO/security/schema/AI + {adapter_count} optional adapter rules).",
+        "\n{} cataloged rules ({core_count} built-in HTTP/SEO/security/schema/AI/a11y + {adapter_count} optional adapter rules).",
         BUILTIN_RULES.len()
     );
     out

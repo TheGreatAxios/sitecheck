@@ -10,7 +10,7 @@ Only `url` is required at the top level. A check module runs when its `[section]
 
 ## `[rules]`
 
-Override the severity of any rule by its `category/rule-name` ID. Run `sitecheck rules` to list the 46 built-in HTTP/SEO/security/schema/AI rules plus the 2 cataloged optional adapter rules (`indexnow/key-file`, `axe/wcag`) and their default severities (`pass`, `warn`, or `fail`).
+Override the severity of any rule by its `category/rule-name` ID. Run `sitecheck rules` to list the 47 built-in HTTP/SEO/security/schema/AI/a11y rules plus the 2 cataloged optional adapter rules (`indexnow/key-file`, `axe/wcag`) and their default severities (`pass`, `warn`, or `fail`).
 
 | Value | Effect |
 | --- | --- |
@@ -25,7 +25,8 @@ Override the severity of any rule by its `category/rule-name` ID. Run `sitecheck
 "http/llms-txt" = "off"
 ```
 
-Optional adapters also attach rule IDs so `[rules]` works uniformly across all modules:
+Dynamic rules and optional adapters also attach rule IDs so `[rules]` works uniformly across all modules:
+- `[a11y]`: `a11y/<rule-id>`, with `"a11y/wcag"` acting as a fallback for all `a11y/*` findings.
 - `[axe]`: `axe/<violation-id>`, with `"axe/wcag"` acting as a fallback for all `axe/*` findings.
 - `[pagespeed]`: `pagespeed/score-<category>` and `pagespeed/<audit-id>`.
 - `[lighthouse]`: `lighthouse/score-<category>` and `lighthouse/<audit-id>`.
@@ -89,6 +90,17 @@ Evaluates `/robots.txt` rules against search bots (`Googlebot`, `Bingbot`, `Appl
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
 | `allow_blocked` | `string[]` | `[]` | Search bot user agents intentionally disallowed in `/robots.txt` |
+
+## `[a11y]`
+
+Built-in static HTML WCAG 2.0/2.1/2.2 accessibility checker powered by [Clearway](https://crates.io/crates/clearway). Enabled by default in `sitecheck init` and requires no browser or Node.js runtime. Computed-style checks (such as rendered color contrast) require a live browser via `[axe]` or `[lighthouse]`.
+
+| Key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `paths` | `string[]` | `["/"]` | Site paths to fetch and audit |
+| `tags` | `string[]` | `["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]` | Clearway rule tags to evaluate (empty runs all enabled rules) |
+| `include_incomplete` | `bool` | `false` | Report findings that need manual/visual review as `warn` |
+| `include_disabled` | `bool` | `false` | Include rules disabled by default in Clearway |
 
 ## `[indexnow]`
 

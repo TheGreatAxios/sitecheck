@@ -1,3 +1,4 @@
+pub mod a11y;
 pub mod ai;
 pub mod axe;
 pub mod http;

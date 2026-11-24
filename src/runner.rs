@@ -24,10 +24,13 @@ pub fn apply_rule_overrides(report: &mut CheckReport, rules: &BTreeMap<String, R
             return true;
         };
         let level = rules.get(rule_id).copied().or_else(|| {
-            rule_id
-                .starts_with("axe/")
-                .then(|| rules.get("axe/wcag").copied())
-                .flatten()
+            if rule_id.starts_with("a11y/") {
+                rules.get("a11y/wcag").copied()
+            } else if rule_id.starts_with("axe/") {
+                rules.get("axe/wcag").copied()
+            } else {
+                None
+            }
         });
         let Some(level) = level else {
             return true;
@@ -281,6 +284,27 @@ mod tests {
             report.findings[0].rule.as_deref(),
             Some("http/homepage-status")
         );
+    }
+
+    #[test]
+    fn applies_a11y_wcag_fallback_override_with_exact_precedence() {
+        let mut report = CheckReport::new(
+            "a11y",
+            vec![
+                Finding::fail("Images must have alt text", None).with_rule("a11y/image-alt"),
+                Finding::fail("html must have lang", None).with_rule("a11y/html-has-lang"),
+            ],
+        );
+
+        let rules = BTreeMap::from([
+            ("a11y/wcag".to_owned(), RuleLevel::Warn),
+            ("a11y/html-has-lang".to_owned(), RuleLevel::Off),
+        ]);
+        apply_rule_overrides(&mut report, &rules);
+
+        assert_eq!(report.findings.len(), 1);
+        assert_eq!(report.findings[0].rule.as_deref(), Some("a11y/image-alt"));
+        assert_eq!(report.findings[0].severity, Severity::Warn);
     }
 
     struct FailingCheck;
