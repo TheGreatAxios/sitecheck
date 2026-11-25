@@ -29,6 +29,7 @@ Generate `sitecheck.toml` and run an audit:
 sitecheck init https://example.com/
 sitecheck run
 sitecheck run --json --strict
+sitecheck indexnow --dry-run
 sitecheck rules
 ```
 
@@ -69,17 +70,30 @@ Built-in checks cover 47 cataloged rules (plus Clearway's built-in static WCAG 2
 | `[structured_data]` | Built-in | JSON-LD schemas, Open Graph, and Twitter Cards |
 | `[ai]` | Built-in | AI search and training bots in `robots.txt` |
 | `[a11y]` | Built-in | Static HTML WCAG 2.0/2.1/2.2 accessibility via Clearway (no browser required) |
-| `[indexnow]` | Opt-in | IndexNow verification key file availability |
+| `[indexnow]` | Opt-in | IndexNow verification key file check and `sitecheck indexnow` post-deploy submission |
 | `[pagespeed]` | Opt-in | Google PageSpeed Insights category scores |
 | `[lighthouse]` | Opt-in | Local Lighthouse runs in headless Chrome |
 | `[axe]` | Opt-in | Live-browser WCAG accessibility audits via `@axe-core/cli` (including computed-style contrast) |
-| `[search_console]` | Opt-in | Google Search Console sitemaps and URL inspection |
+| `[search_console]` | Opt-in | Google Search Console sitemaps, URL inspection, indexing coverage %, and crawl lag |
+
+## Post-Deploy IndexNow & Indexing Tracking
+
+Ping IndexNow search engines right after deploying a site (reads `[indexnow]` and submits all same-origin `/sitemap.xml` URLs by default, or specific `--url` flags):
+
+```sh
+wrangler deploy && sitecheck indexnow
+sitecheck indexnow --dry-run --json
+sitecheck indexnow --url https://example.com/ --url https://example.com/blog
+```
+
+To track SEO, AEO, and Google Search Console indexing coverage/crawl lag over time in CI or cron, see [examples/track-indexing.sh](examples/track-indexing.sh).
 
 ## Documentation
 
 - [Configuration reference](docs/configuration.md): all `sitecheck.toml` sections, rule overrides, and environment variables.
 - [Extending and agent loops](docs/extending.md): writing check modules and running `--json --strict` in CI.
 - [Example config](examples/sitecheck.toml): commented starter file.
+- [Indexing tracker script](examples/track-indexing.sh): CI/CD post-deploy IndexNow ping and JSONL health history logger.
 - [API docs on docs.rs](https://docs.rs/sitecheck) (or build locally with `cargo doc --no-deps --open`).
 
 ## License

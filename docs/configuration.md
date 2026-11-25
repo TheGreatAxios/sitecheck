@@ -30,7 +30,7 @@ Dynamic rules and optional adapters also attach rule IDs so `[rules]` works unif
 - `[axe]`: `axe/<violation-id>`, with `"axe/wcag"` acting as a fallback for all `axe/*` findings.
 - `[pagespeed]`: `pagespeed/score-<category>` and `pagespeed/<audit-id>`.
 - `[lighthouse]`: `lighthouse/score-<category>` and `lighthouse/<audit-id>`.
-- `[search_console]`: `gsc/sitemap`, `gsc/index`, and `gsc/canonical`.
+- `[search_console]`: `gsc/sitemap`, `gsc/index`, `gsc/canonical`, `gsc/coverage`, and `gsc/crawl-lag`.
 - Check runtime errors: `<check-name>/error` (when a check returns an error, `sitecheck` records a `fail` finding and continues running remaining checks).
 
 ## `[http]`
@@ -104,12 +104,13 @@ Built-in static HTML WCAG 2.0/2.1/2.2 accessibility checker powered by [Clearway
 
 ## `[indexnow]`
 
-Verifies that the configured IndexNow verification key file is served at HTTP 200 and matches `key`.
+Verifies that the configured IndexNow verification key file is served at HTTP 200 and matches `key`. Also read by `sitecheck indexnow` when submitting URLs after deploy.
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
 | `key` | `string` | *(required)* | IndexNow verification key |
 | `key_location` | `string` | `/<key>.txt` | Custom path or URL for the key file |
+| `endpoint` | `string` | `"https://api.indexnow.org/indexnow"` | IndexNow submission API endpoint used by `sitecheck indexnow` |
 
 ## `[pagespeed]`
 
@@ -144,7 +145,7 @@ Runs `@axe-core/cli` against configured paths to check WCAG accessibility rules.
 
 ## `[search_console]`
 
-Queries Google Search Console sitemaps and URL Inspection APIs using a Google Cloud service account.
+Queries Google Search Console sitemaps and URL Inspection APIs using a Google Cloud service account. Reports sitemap status, per-URL index verdict and canonical parity, overall indexing coverage percentage (`gsc/coverage`), and average/max crawl lag in days comparing `/sitemap.xml` `<lastmod>` against GSC `lastCrawlTime` (`gsc/crawl-lag`).
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |

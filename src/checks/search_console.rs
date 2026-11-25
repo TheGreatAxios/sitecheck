@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -12,6 +13,8 @@ use crate::check::{
     Check, CheckContext, CheckError, CheckReport, Finding, MAX_HTML_BODY_BYTES,
     MAX_TEXT_BODY_BYTES, read_body_limited,
 };
+use crate::checks::http::extract_sitemap_lastmods;
+use crate::checks::security_headers::parse_rfc3339_unix;
 
 const DEFAULT_TOKEN_URI: &str = "https://oauth2.googleapis.com/token";
 const WEBMASTERS_SCOPE: &str = "https://www.googleapis.com/auth/webmasters.readonly";
@@ -238,12 +241,127 @@ async fn check_sitemaps(
     Ok(findings)
 }
 
+struct UrlInspectionOutcome {
+    indexed: bool,
+    last_crawl_time: Option<String>,
+}
+
+fn parse_timestamp_unix(raw: &str) -> Option<i64> {
+    let trimmed = raw.trim();
+    if trimmed.len() == 10 {
+        parse_rfc3339_unix(&format!("{trimmed}T00:00:00Z"))
+    } else {
+        parse_rfc3339_unix(trimmed)
+    }
+}
+
+async fn fetch_sitemap_lastmods(ctx: &CheckContext) -> BTreeMap<String, String> {
+    let Ok(sitemap_url) = ctx.base_url.join("/sitemap.xml") else {
+        return BTreeMap::new();
+    };
+    let Ok(resp) = ctx.same_origin_client.get(sitemap_url).send().await else {
+        return BTreeMap::new();
+    };
+    if !resp.status().is_success() {
+        return BTreeMap::new();
+    }
+    let Ok(xml) = read_body_limited(resp, MAX_HTML_BODY_BYTES).await else {
+        return BTreeMap::new();
+    };
+    extract_sitemap_lastmods(&xml)
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn summarize_indexing_metrics(
+    outcomes: &[(String, UrlInspectionOutcome)],
+    sitemap_lastmods: &BTreeMap<String, String>,
+) -> Vec<Finding> {
+    if outcomes.is_empty() {
+        return Vec::new();
+    }
+
+    let mut findings = Vec::new();
+    let inspected = outcomes.len();
+    let indexed = outcomes.iter().filter(|(_, o)| o.indexed).count();
+    let coverage_pct = (indexed as f64 / inspected as f64) * 100.0;
+    let coverage_detail =
+        format!("{indexed}/{inspected} inspected URLs indexed ({coverage_pct:.1}%)");
+    let coverage_finding = if indexed == inspected {
+        Finding::pass("GSC indexing coverage", Some(coverage_detail))
+    } else if indexed > 0 {
+        Finding::warn("GSC indexing coverage", Some(coverage_detail))
+    } else {
+        Finding::fail("GSC indexing coverage", Some(coverage_detail))
+    }
+    .with_rule("gsc/coverage");
+    findings.push(coverage_finding);
+
+    let mut lag_sum_days = 0.0_f64;
+    let mut max_lag_days = 0.0_f64;
+    let mut lag_samples = 0usize;
+    let mut stale_count = 0usize;
+
+    for (url, outcome) in outcomes {
+        let Some(last_crawl) = outcome.last_crawl_time.as_deref() else {
+            continue;
+        };
+        let lastmod = sitemap_lastmods.get(url).or_else(|| {
+            Url::parse(url)
+                .ok()
+                .and_then(|parsed| sitemap_lastmods.get(parsed.as_str()))
+        });
+        let Some(lastmod) = lastmod else {
+            continue;
+        };
+        let (Some(crawl_ts), Some(lastmod_ts)) = (
+            parse_timestamp_unix(last_crawl),
+            parse_timestamp_unix(lastmod),
+        ) else {
+            continue;
+        };
+
+        let diff_secs = crawl_ts - lastmod_ts;
+        if diff_secs < 0 {
+            stale_count += 1;
+        }
+        let lag_days = diff_secs.unsigned_abs() as f64 / 86_400.0;
+        lag_sum_days += lag_days;
+        if lag_days > max_lag_days {
+            max_lag_days = lag_days;
+        }
+        lag_samples += 1;
+    }
+
+    if lag_samples > 0 {
+        let avg_lag_days = lag_sum_days / lag_samples as f64;
+        let lag_finding = if stale_count > 0 {
+            Finding::warn(
+                "GSC crawl lag",
+                Some(format!(
+                    "avg {avg_lag_days:.1}d, max {max_lag_days:.1}d across {lag_samples} URL(s) ({stale_count} pending recrawl since lastmod)"
+                )),
+            )
+        } else {
+            Finding::pass(
+                "GSC crawl lag",
+                Some(format!(
+                    "avg {avg_lag_days:.1}d, max {max_lag_days:.1}d across {lag_samples} URL(s)"
+                )),
+            )
+        }
+        .with_rule("gsc/crawl-lag");
+        findings.push(lag_finding);
+    }
+
+    findings
+}
+
 async fn inspect_url(
     client: &reqwest::Client,
     access_token: &str,
     site_url: &str,
     inspection_url: &str,
-) -> Result<Vec<Finding>, CheckError> {
+) -> Result<(Vec<Finding>, UrlInspectionOutcome), CheckError> {
     let resp = client
         .post(URL_INSPECTION_ENDPOINT)
         .bearer_auth(access_token)
@@ -271,13 +389,19 @@ async fn inspect_url(
         .and_then(|r| r.get("indexStatusResult"));
 
     let Some(index_status) = index_status else {
-        return Ok(vec![
-            Finding::warn(
-                format!("GSC inspect {inspection_url}"),
-                Some("response missing `indexStatusResult`".to_owned()),
-            )
-            .with_rule("gsc/index"),
-        ]);
+        return Ok((
+            vec![
+                Finding::warn(
+                    format!("GSC inspect {inspection_url}"),
+                    Some("response missing `indexStatusResult`".to_owned()),
+                )
+                .with_rule("gsc/index"),
+            ],
+            UrlInspectionOutcome {
+                indexed: false,
+                last_crawl_time: None,
+            },
+        ));
     };
 
     let verdict = index_status
@@ -288,6 +412,10 @@ async fn inspect_url(
         .get("coverageState")
         .and_then(Value::as_str)
         .unwrap_or("unknown");
+    let last_crawl_time = index_status
+        .get("lastCrawlTime")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
 
     let mut findings = Vec::new();
     let coverage_finding = match verdict {
@@ -332,7 +460,13 @@ async fn inspect_url(
         }
     }
 
-    Ok(findings)
+    Ok((
+        findings,
+        UrlInspectionOutcome {
+            indexed: verdict == "PASS",
+            last_crawl_time,
+        },
+    ))
 }
 
 #[async_trait]
@@ -352,6 +486,7 @@ impl Check for SearchConsoleCheck {
             .unwrap_or(ctx.base_url.as_str());
 
         let mut findings = check_sitemaps(&ctx.client, &token, site_url).await?;
+        let sitemap_lastmods = fetch_sitemap_lastmods(ctx).await;
 
         let urls_to_inspect: Vec<String> = if self.config.inspect_urls.is_empty() {
             vec![ctx.base_url.to_string()]
@@ -359,9 +494,14 @@ impl Check for SearchConsoleCheck {
             self.config.inspect_urls.clone()
         };
 
+        let mut outcomes = Vec::with_capacity(urls_to_inspect.len());
         for url in &urls_to_inspect {
-            findings.extend(inspect_url(&ctx.client, &token, site_url, url).await?);
+            let (url_findings, outcome) = inspect_url(&ctx.client, &token, site_url, url).await?;
+            findings.extend(url_findings);
+            outcomes.push((url.clone(), outcome));
         }
+
+        findings.extend(summarize_indexing_metrics(&outcomes, &sitemap_lastmods));
 
         Ok(CheckReport::new(self.name(), findings))
     }
@@ -369,7 +509,11 @@ impl Check for SearchConsoleCheck {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_token_uri;
+    use std::collections::BTreeMap;
+
+    use super::{UrlInspectionOutcome, summarize_indexing_metrics, validate_token_uri};
+    use crate::check::Severity;
+    use crate::checks::http::extract_sitemap_lastmods;
 
     #[test]
     fn requires_https_token_uri() {
@@ -377,5 +521,70 @@ mod tests {
         assert!(validate_token_uri("http://oauth2.googleapis.com/token").is_err());
         assert!(validate_token_uri("http://169.254.169.254/token").is_err());
         assert!(validate_token_uri("not-a-url").is_err());
+    }
+
+    #[test]
+    fn summarizes_indexing_coverage_and_crawl_lag() {
+        let outcomes = vec![
+            (
+                "https://example.com/".to_owned(),
+                UrlInspectionOutcome {
+                    indexed: true,
+                    last_crawl_time: Some("2026-03-04T00:00:00Z".to_owned()),
+                },
+            ),
+            (
+                "https://example.com/about".to_owned(),
+                UrlInspectionOutcome {
+                    indexed: false,
+                    last_crawl_time: Some("2026-03-01T00:00:00Z".to_owned()),
+                },
+            ),
+        ];
+        let lastmods = BTreeMap::from([
+            ("https://example.com/".to_owned(), "2026-03-01".to_owned()),
+            (
+                "https://example.com/about".to_owned(),
+                "2026-03-02T00:00:00Z".to_owned(),
+            ),
+        ]);
+
+        let findings = summarize_indexing_metrics(&outcomes, &lastmods);
+        assert_eq!(findings.len(), 2);
+
+        assert_eq!(findings[0].rule.as_deref(), Some("gsc/coverage"));
+        assert_eq!(findings[0].severity, Severity::Warn);
+        assert_eq!(
+            findings[0].detail.as_deref(),
+            Some("1/2 inspected URLs indexed (50.0%)")
+        );
+
+        assert_eq!(findings[1].rule.as_deref(), Some("gsc/crawl-lag"));
+        assert_eq!(findings[1].severity, Severity::Warn);
+        assert_eq!(
+            findings[1].detail.as_deref(),
+            Some("avg 2.0d, max 3.0d across 2 URL(s) (1 pending recrawl since lastmod)")
+        );
+    }
+
+    #[test]
+    fn extracts_sitemap_lastmods_for_crawl_lag() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://example.com/</loc>
+    <lastmod>2026-03-01</lastmod>
+  </url>
+  <url>
+    <loc>https://example.com/docs</loc>
+  </url>
+</urlset>"#;
+
+        let map = extract_sitemap_lastmods(xml);
+        assert_eq!(map.len(), 1);
+        assert_eq!(
+            map.get("https://example.com/").map(String::as_str),
+            Some("2026-03-01")
+        );
     }
 }

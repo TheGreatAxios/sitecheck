@@ -148,6 +148,7 @@ check_twitter = true
 # [indexnow]
 # key = "your-indexnow-key"
 # key_location = "https://example.com/your-indexnow-key.txt"
+# endpoint = "https://api.indexnow.org/indexnow"
 
 # [pagespeed]
 # strategies = ["mobile", "desktop"]

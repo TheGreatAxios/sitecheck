@@ -5,6 +5,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use url::Url;
 
+use sitecheck::checks::indexnow::{format_indexnow_text, submit_indexnow};
 use sitecheck::config::{Config, default_config_template};
 use sitecheck::rules::format_rules_catalog;
 use sitecheck::runner::{format_text, run_checks};
@@ -43,6 +44,21 @@ enum Command {
     },
     /// List all cataloged rules (built-in checks and optional adapters) and their default severities.
     Rules,
+    /// Submit site URLs to `IndexNow` (Bing, Yandex, Naver, Seznam) after deploy.
+    Indexnow {
+        /// Path to the sitecheck configuration file.
+        #[arg(long, default_value = "sitecheck.toml")]
+        config: PathBuf,
+        /// Print the URLs and target endpoint without verifying the key file or submitting.
+        #[arg(long)]
+        dry_run: bool,
+        /// Specific URL(s) to submit (repeatable; defaults to all same-origin URLs in /sitemap.xml).
+        #[arg(long = "url")]
+        urls: Vec<Url>,
+        /// Emit submission result as JSON.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[tokio::main]
@@ -106,6 +122,42 @@ async fn main() -> ExitCode {
             } else {
                 ExitCode::FAILURE
             }
+        }
+        Command::Indexnow {
+            config,
+            dry_run,
+            urls,
+            json,
+        } => {
+            let cfg = match Config::from_file(&config) {
+                Ok(cfg) => cfg,
+                Err(err) => {
+                    eprintln!("error: {err}");
+                    return ExitCode::FAILURE;
+                }
+            };
+
+            let result = match submit_indexnow(&cfg, &urls, dry_run).await {
+                Ok(result) => result,
+                Err(err) => {
+                    eprintln!("error: {err}");
+                    return ExitCode::FAILURE;
+                }
+            };
+
+            if json {
+                match serde_json::to_string_pretty(&result) {
+                    Ok(rendered) => println!("{rendered}"),
+                    Err(err) => {
+                        eprintln!("error: failed to serialize JSON: {err}");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            } else {
+                print!("{}", format_indexnow_text(&result));
+            }
+
+            ExitCode::SUCCESS
         }
     }
 }

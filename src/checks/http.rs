@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use async_trait::async_trait;
 use reqwest::StatusCode;
 use reqwest::header::LOCATION;
@@ -582,6 +584,39 @@ pub fn extract_sitemap_locs(xml: &str) -> Vec<String> {
     }
 
     locs
+}
+
+/// Extracts `<loc>` -> `<lastmod>` pairs from `<url>` entries in a `sitemap.xml` document.
+#[must_use]
+pub fn extract_sitemap_lastmods(xml: &str) -> BTreeMap<String, String> {
+    let lower = xml.to_ascii_lowercase();
+    let mut lastmods = BTreeMap::new();
+    let mut cursor = 0usize;
+
+    while let Some(open_rel) = lower[cursor..].find("<url>") {
+        let block_start = cursor + open_rel + 5;
+        let Some(close_rel) = lower[block_start..].find("</url>") else {
+            break;
+        };
+        let block = &xml[block_start..block_start + close_rel];
+        let block_lower = &lower[block_start..block_start + close_rel];
+
+        if let Some(loc_open) = block_lower.find("<loc>")
+            && let Some(loc_close) = block_lower[loc_open + 5..].find("</loc>")
+            && let Some(mod_open) = block_lower.find("<lastmod>")
+            && let Some(mod_close) = block_lower[mod_open + 9..].find("</lastmod>")
+        {
+            let loc = block[loc_open + 5..loc_open + 5 + loc_close].trim();
+            let lastmod = block[mod_open + 9..mod_open + 9 + mod_close].trim();
+            if !loc.is_empty() && !lastmod.is_empty() {
+                lastmods.insert(loc.to_owned(), lastmod.to_owned());
+            }
+        }
+
+        cursor = block_start + close_rel + 6;
+    }
+
+    lastmods
 }
 
 /// Extracts a named attribute value from a single HTML tag slice.
