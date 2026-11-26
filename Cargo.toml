@@ -1,6 +1,6 @@
 [package]
 name = "sitecheck"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "Fast, config-driven web health checks for HTTP, structured data, PageSpeed Insights, Lighthouse, and Google Search Console."
@@ -14,7 +14,7 @@ exclude = [".github/", "docs/"]
 [dependencies]
 async-trait = "0.1"
 clap = { version = "4", features = ["derive"] }
-clearway = "0.1.1"
+clearway = "0.1.2"
 jsonwebtoken = { version = "9", default-features = false, features = ["use_pem"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 serde = { version = "1", features = ["derive"] }

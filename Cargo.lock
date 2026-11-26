@@ -186,9 +186,9 @@ checksum = "e0921b3876b3a1df8a1c9f912e7f94342458022c2e84288015893d83c4d62a79"
 
 [[package]]
 name = "clearway"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7781ff9cf33f2362138d9b68c3a3488a7de02a18a433267360c9ef82c6956a52"
+checksum = "04a6e7973812e0e0ea53c2f6aae9d8da2d887176b6bb5a91d880dd44cbe2d378"
 dependencies = [
  "ego-tree",
  "scraper",
@@ -1317,7 +1317,7 @@ checksum = "33f4fe9184a62d842c9ef383018f3306d8ba224fd9d836f56d7288308847c256"
 
 [[package]]
 name = "sitecheck"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "clap",
