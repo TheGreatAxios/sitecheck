@@ -676,6 +676,44 @@ pub(crate) fn urls_match(a: &str, b: &str) -> bool {
 
 pub use crate::check::is_same_origin;
 
+const TWO_LABEL_PUBLIC_SUFFIXES: &[&str] = &[
+    "ac.jp", "ac.uk", "co.id", "co.il", "co.in", "co.jp", "co.ke", "co.kr", "co.nz", "co.th",
+    "co.uk", "co.za", "com.ar", "com.au", "com.br", "com.cn", "com.eg", "com.hk", "com.mx",
+    "com.my", "com.ng", "com.ph", "com.pl", "com.sa", "com.sg", "com.tr", "com.tw", "com.ua",
+    "com.vn", "edu.au", "go.jp", "gov.au", "gov.uk", "me.uk", "ne.jp", "net.au", "net.nz", "or.jp",
+    "org.au", "org.nz", "org.uk",
+];
+
+#[must_use]
+pub(crate) fn is_apex_domain(host: &str) -> bool {
+    let normalized = host.trim_end_matches('.').to_ascii_lowercase();
+    let labels: Vec<&str> = normalized.split('.').collect();
+    if labels.len() < 2 || labels.contains(&"") {
+        return false;
+    }
+    match labels.len() {
+        2 => !TWO_LABEL_PUBLIC_SUFFIXES.contains(&normalized.as_str()),
+        3 => {
+            let suffix = format!("{}.{}", labels[1], labels[2]);
+            TWO_LABEL_PUBLIC_SUFFIXES.contains(&suffix.as_str())
+        }
+        _ => false,
+    }
+}
+
+/// Returns the counterpart host to probe for `http/www-redirect` (`www.<apex>` for an apex
+/// domain, or `<apex>` for an explicit `www.<apex>` host), or `None` for non-apex subdomains,
+/// preview hosts, and local hosts.
+#[must_use]
+pub(crate) fn www_redirect_probe_host(host: &str) -> Option<String> {
+    let normalized = host.trim_end_matches('.').to_ascii_lowercase();
+    if let Some(apex) = normalized.strip_prefix("www.") {
+        is_apex_domain(apex).then(|| apex.to_owned())
+    } else {
+        is_apex_domain(&normalized).then(|| format!("www.{normalized}"))
+    }
+}
+
 async fn check_www_redirect(ctx: &CheckContext) -> Finding {
     let Some(host) = ctx.base_url.host_str() else {
         return Finding::warn(
@@ -684,37 +722,34 @@ async fn check_www_redirect(ctx: &CheckContext) -> Finding {
         )
         .with_rule("http/www-redirect");
     };
-    if host.starts_with("www.")
-        || host == "localhost"
-        || matches!(
-            ctx.base_url.host(),
-            Some(url::Host::Ipv4(_) | url::Host::Ipv6(_))
-        )
-    {
+    let is_ip = matches!(
+        ctx.base_url.host(),
+        Some(url::Host::Ipv4(_) | url::Host::Ipv6(_))
+    );
+    let Some(probe_host) = (!is_ip).then(|| www_redirect_probe_host(host)).flatten() else {
         return Finding::pass(
             "www -> apex redirect",
-            Some(format!("skipped for host `{host}`")),
+            Some(format!("skipped for non-apex host `{host}`")),
         )
         .with_rule("http/www-redirect");
+    };
+    let title = if host.starts_with("www.") {
+        "apex -> www redirect"
+    } else {
+        "www -> apex redirect"
+    };
+
+    let mut probe_url = ctx.base_url.clone();
+    if probe_url.set_host(Some(&probe_host)).is_err() {
+        return Finding::warn(title, Some(format!("could not construct {probe_host}")))
+            .with_rule("http/www-redirect");
     }
 
-    let mut www_url = ctx.base_url.clone();
-    if www_url.set_host(Some(&format!("www.{host}"))).is_err() {
-        return Finding::warn(
-            "www -> apex redirect",
-            Some(format!("could not construct www.{host}")),
-        )
-        .with_rule("http/www-redirect");
-    }
-
-    let resp = match ctx.no_redirect_client.get(www_url.clone()).send().await {
+    let resp = match ctx.no_redirect_client.get(probe_url.clone()).send().await {
         Ok(resp) => resp,
         Err(err) => {
-            return Finding::fail(
-                "www -> apex redirect",
-                Some(format!("request to {www_url} failed: {err}")),
-            )
-            .with_rule("http/www-redirect");
+            return Finding::fail(title, Some(format!("request to {probe_url} failed: {err}")))
+                .with_rule("http/www-redirect");
         }
     };
 
@@ -727,33 +762,30 @@ async fn check_www_redirect(ctx: &CheckContext) -> Finding {
 
     match (status.as_u16(), location) {
         (301 | 308, Some(loc)) => {
-            let resolved = www_url
+            let resolved = probe_url
                 .join(&loc)
                 .map_or_else(|_| loc.clone(), |u| u.to_string());
             if urls_match(&resolved, ctx.base_url.as_str()) {
-                Finding::pass(
-                    "www -> apex redirect",
-                    Some(format!("{www_url} -> {status} {resolved}")),
-                )
+                Finding::pass(title, Some(format!("{probe_url} -> {status} {resolved}")))
             } else {
                 Finding::fail(
-                    "www -> apex redirect",
+                    title,
                     Some(format!(
-                        "{www_url} redirected ({status}) to {resolved}, expected {}",
+                        "{probe_url} redirected ({status}) to {resolved}, expected {}",
                         ctx.base_url
                     )),
                 )
             }
         }
         (302 | 307, Some(loc)) => Finding::warn(
-            "www -> apex redirect",
+            title,
             Some(format!(
-                "{www_url} returned temporary {status} -> {loc} (expected 301)"
+                "{probe_url} returned temporary {status} -> {loc} (expected 301)"
             )),
         ),
         _ => Finding::fail(
-            "www -> apex redirect",
-            Some(format!("{www_url} returned HTTP {status} (expected 301)")),
+            title,
+            Some(format!("{probe_url} returned HTTP {status} (expected 301)")),
         ),
     }
     .with_rule("http/www-redirect")
@@ -1492,7 +1524,7 @@ mod tests {
         HTML_SIZE_FAIL_BYTES, HTML_SIZE_WARN_BYTES, RobotsRules, extract_canonical,
         extract_sitemap_locs, find_invalid_head_tags, has_content_signal, has_noindex,
         is_path_allowed_noindex, is_same_origin, validate_head, validate_html_size,
-        validate_llms_txt,
+        validate_llms_txt, www_redirect_probe_host,
     };
     use crate::check::Severity;
 
@@ -1660,5 +1692,52 @@ mod tests {
         assert!(!is_same_origin(&base, &different_port));
         assert!(!is_same_origin(&base, &cross_origin));
         assert!(!is_same_origin(&base, &metadata));
+    }
+
+    #[test]
+    fn www_redirect_probes_apex_and_www_hosts() {
+        assert_eq!(
+            www_redirect_probe_host("example.com").as_deref(),
+            Some("www.example.com")
+        );
+        assert_eq!(
+            www_redirect_probe_host("www.example.com").as_deref(),
+            Some("example.com")
+        );
+        assert_eq!(
+            www_redirect_probe_host("example.co.uk").as_deref(),
+            Some("www.example.co.uk")
+        );
+        assert_eq!(
+            www_redirect_probe_host("www.example.co.uk").as_deref(),
+            Some("example.co.uk")
+        );
+        assert_eq!(
+            www_redirect_probe_host("Example.COM.").as_deref(),
+            Some("www.example.com")
+        );
+    }
+
+    #[test]
+    fn www_redirect_skips_subdomains_and_preview_hosts() {
+        for host in [
+            "demos.pinplay.golf",
+            "my-app.vercel.app",
+            "audit-per-site-s4l4w2rwb-benskales-projects.vercel.app",
+            "bar.pages.dev",
+            "baz.workers.dev",
+            "foo.netlify.app",
+            "user.github.io",
+            "docs.example.co.uk",
+            "www.demos.pinplay.golf",
+            "localhost",
+            "co.uk",
+        ] {
+            assert_eq!(
+                www_redirect_probe_host(host),
+                None,
+                "expected `{host}` to skip www redirect check"
+            );
+        }
     }
 }
