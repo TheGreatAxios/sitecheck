@@ -1721,15 +1721,15 @@ mod tests {
     #[test]
     fn www_redirect_skips_subdomains_and_preview_hosts() {
         for host in [
-            "demos.pinplay.golf",
+            "demos.example.com",
             "my-app.vercel.app",
-            "audit-per-site-s4l4w2rwb-benskales-projects.vercel.app",
+            "preview-abc123-team.vercel.app",
             "bar.pages.dev",
             "baz.workers.dev",
             "foo.netlify.app",
             "user.github.io",
             "docs.example.co.uk",
-            "www.demos.pinplay.golf",
+            "www.demos.example.com",
             "localhost",
             "co.uk",
         ] {
